@@ -1,4 +1,4 @@
-name: GitHub CI
+name: Github CI
 on: [push]
 jobs:
   test:
@@ -10,20 +10,18 @@ jobs:
       - name: Install Codon
         run: |
           mkdir -p ${HOME}/.codon
-          curl -L https://github.com/exaloop/codon/releases/download/v0.19.3/codon-linux-x86_64.tar.gz \
-            | tar zxvf - --strip-components=1 -C ${HOME}/.codon
-          curl -L https://github.com/exaloop/seq/releases/download/v0.11.5/seq-linux-x86_64.tar.gz \
-            | tar zxvf - -C ${HOME}/.codon/lib/codon/plugins
+          curl -L https://github.com/exaloop/codon/releases/download/v0.19.3/codon-linux-x86_64.tar.gz | tar zxvf - --strip-components=1 -C ${HOME}/.codon
+          curl -L https://github.com/exaloop/seq/releases/download/v0.11.5/seq-linux-x86_64.tar.gz | tar zxvf - -C ${HOME}/.codon/lib/codon/plugins
           export PATH=${PATH}:${HOME}/.codon/bin
       - name: Check out repository code
         uses: actions/checkout@v5
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Set up Codon Python bridge
         run: |
-          export CODON_PYTHON=$(curl -L https://raw.githubusercontent.com/exaloop/codon/refs/heads/develop/test/python/find-python-library.py | python)
+          pip install find_libpython
+          export CODON_PYTHON=$(find_libpython)
           echo "Found Python at: ${CODON_PYTHON}"
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."

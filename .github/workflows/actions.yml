@@ -13,6 +13,7 @@ jobs:
           curl -L https://github.com/exaloop/codon/releases/download/v0.19.3/codon-linux-x86_64.tar.gz | tar zxvf - --strip-components=1 -C ${HOME}/.codon
           curl -L https://github.com/exaloop/seq/releases/download/v0.11.5/seq-linux-x86_64.tar.gz | tar zxvf - -C ${HOME}/.codon/lib/codon/plugins
           export PATH=${PATH}:${HOME}/.codon/bin
+          echo "${HOME}/.codon/bin" >> "$GITHUB_PATH"
       - name: Check out repository code
         uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -20,14 +21,14 @@ jobs:
           python-version: '3.13'
       - name: Set up Codon Python bridge
         run: |
-          pip install find_libpython
-          export CODON_PYTHON=$(find_libpython)
+          python -m pip install --upgrade pip
+          python -m pip install find_libpython
+          echo "CODON_PYTHON=$(python -c 'import find_libpython as f; print(f.find_libpython())')" >> "$GITHUB_ENV"
           echo "Found Python at: ${CODON_PYTHON}"
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
       - name: Week 1
         env:
-          # ensure the script sees it even if you also export inside evaluate.sh
           CODON_PYTHON: ${{ env.CODON_PYTHON }}
         run: |
           chmod +x week1/evaluate.sh

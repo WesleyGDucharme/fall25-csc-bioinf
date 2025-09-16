@@ -45,7 +45,7 @@ To run evaluate.sh or tests.sh please run these commands in this order:
    chmod +x tests.sh  
    ./tests.sh  
 
-To run the code manually without evaluation.sh or without tests.sh please be sure to run the following commands in the order shown below:
+To run the code manually without evaluation.sh or without tests.sh please be sure to run the following commands in the order shown below:  
    python3 main.py ../data/data1  
    python3 main.py ../data/data2  
    python3 main.py ../data/data3  

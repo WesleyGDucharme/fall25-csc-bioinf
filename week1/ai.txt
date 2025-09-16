@@ -1,7 +1,7 @@
 LLM model used: ChatGPT 
 Version: GPT-5
 
-## Prompts and Topics
+Prompts and Topics:
 Throughout my work on deliverable 1 I used ChatGPT to:
 - Translate and explain the original `report.pdf` (written in Mandarin).
   * Prompt example: "please translate this report document to English"
@@ -18,8 +18,9 @@ Throughout my work on deliverable 1 I used ChatGPT to:
   * Prompt example: "is there a way to wrap these manual tests into test file I could call in the test directory?"
   * Prompt example: "Walk me through how to setup a evaluate.sh file that use some python to calculate N50"
 
-## Notes
+Notes:
 - I edited and ran all code locally to verify correctness.
 - AI suggestions were adapted and integrated into my own implementation.
 - Not all outputs from ChatGPT were used directly — in some cases I rolled back to earlier versions or of course ignored the answers and solution prototypes that I knew were wrong or would not work.
+
 

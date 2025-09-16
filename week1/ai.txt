@@ -1,0 +1,25 @@
+LLM model used: ChatGPT 
+Version: GPT-5
+
+## Prompts and Topics
+Throughout my work on deliverable 1 I used ChatGPT to:
+- Translate and explain the original `report.pdf` (written in Mandarin).
+  * Prompt example: "please translate this report document to English"
+
+- Debug issues with running the assembler under Codon.
+  * Prompt example: "when i run main.py i get this an error around the use of os.path.join()"
+  * Prompt example: "codon run gives error: 'NoneType' object has no attribute '__hash__' what does this mean?"
+
+- Getting guidance on making code Codon-compatible.
+  * Prompt example: "help me change read_fasta() to what it needs to be to work without the os.path.join"
+  * Prompt example: "Show me some examples of using python interops to help work around the differences in the resutls we are seeing when running the codon and python versions of the file"
+
+- Write automation scripts for testing and evaluation.
+  * Prompt example: "is there a way to wrap these manual tests into test file I could call in the test directory?"
+  * Prompt example: "Walk me through how to setup a evaluate.sh file that use some python to calculate N50"
+
+## Notes
+- I edited and ran all code locally to verify correctness.
+- AI suggestions were adapted and integrated into my own implementation.
+- Not all outputs from ChatGPT were used directly — in some cases I rolled back to earlier versions or of course ignored the answers and solution prototypes that I knew were wrong or would not work.
+

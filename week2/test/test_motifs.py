@@ -237,7 +237,7 @@ U:   0.50   0.17   0.50   0.17   0.50
 
     def test_minimal_meme_parser(self):
         """Parse motifs/minimal_test.meme file."""
-        with open("motifs/minimal_test.meme") as stream:
+        with open("../data/minimal_test.meme") as stream:
             record = motifs.parse(stream, "minimal")
         self.assertEqual(record.version, "4")
         self.assertEqual(record.alphabet, "ACGT")
@@ -329,7 +329,7 @@ U:   0.50   0.17   0.50   0.17   0.50
             )
         )
         self.assertEqual(motif[2:9].consensus, "CTGTATA")
-        with open("motifs/minimal_test.meme") as stream:
+        with open("../data/minimal_test.meme") as stream:
             record = motifs.parse(stream, "minimal")
         motif = record[2]
         self.assertEqual(motif.name, "IFXA_no_nsites_no_evalue")
@@ -376,7 +376,7 @@ U:   0.50   0.17   0.50   0.17   0.50
 
     def test_meme_parser_rna(self):
         """Test if Bio.motifs can parse MEME output files using RNA."""
-        with open("motifs/minimal_test_rna.meme") as stream:
+        with open("../data/minimal_test_rna.meme") as stream:
             record = motifs.parse(stream, "minimal")
         self.assertEqual(record.version, "4")
         self.assertEqual(record.alphabet, "ACGU")
@@ -516,7 +516,7 @@ U:   0.50   0.17   0.50   0.17   0.50
 class MotifTestPWM(unittest.TestCase):
     """PWM motif tests."""
 
-    with open("motifs/SRF.pfm") as stream:
+    with open("../data/SRF.pfm") as stream:
         m = motifs.read(stream, "pfm")
 
     s = Seq("ACGTGTGCGTAGTGCGT")

@@ -9,9 +9,10 @@
 """Tests for motifs module."""
 
 import math
+from math import isfinite
 import tempfile
 import unittest
-
+import os, sys
 try:
     import numpy as np
 except ImportError:
@@ -23,7 +24,7 @@ except ImportError:
 
 from Bio import motifs
 from Bio.Seq import Seq
-
+from Bio.motifs import thresholds as thresholds_mod
 
 class TestBasic(unittest.TestCase):
     """Basic motif tests."""
@@ -638,6 +639,72 @@ class MotifTestPWM(unittest.TestCase):
         self.assertAlmostEqual(result[4], -20.3014183, places=5)
         self.assertAlmostEqual(result[5], -25.18009186, places=5)
         self.assertTrue(math.isnan(result[6]), f"Expected nan, not {result[6]!r}")
+
+def _uniform_bg():
+    # uniform DNA background
+    return {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25}
+
+def _toy_instances():
+    # Small deterministic motif, 4 columns, 4 instances:
+    # pos0: A=4 ; pos1: C=4 ; pos2: G=3,C=1 ; pos3: T=3,C=1
+    return [Seq("ACGT"), Seq("ACGT"), Seq("AGGT"), Seq("ACCT")]
+
+class TestThresholds(unittest.TestCase):
+    def _pssm(self):
+        m = motifs.create(_toy_instances())
+        # getting counts
+        counts = m.counts  # FrequencyPositionMatrix
+        # normalizing to PWM with explicit pseudocounts
+        pwm = counts.normalize(pseudocounts=1.0)  # PositionWeightMatrix
+        # converting to PSSM (log-odds) with explicit background
+        return pwm.log_odds(_uniform_bg())  # PositionSpecificScoringMatrix
+
+    def _pssm_minmax(self, pssm):
+    # Portable across Biopython versions: min/max may be attributes or methods
+    # Trying attributes first, then methods.
+        try:
+            smin = pssm.min
+        except Exception:
+            smin = pssm.min()
+        try:
+            smax = pssm.max
+        except Exception:
+            smax = pssm.max()
+        return smin, smax
+
+    def test_fpr_monotonic(self):
+        pssm = self._pssm()
+        dist = thresholds_mod.ScoreDistribution(pssm=pssm, background=_uniform_bg(), precision=1000)
+        t_1 = dist.threshold_fpr(0.01)
+        t_5 = dist.threshold_fpr(0.05)
+        # Allowing higher FPR should LOWER the threshold
+        self.assertGreater(t_1, t_5)
+
+    def test_fnr_monotonic(self):
+        pssm = self._pssm()
+        dist = thresholds_mod.ScoreDistribution(pssm=pssm, background=_uniform_bg(), precision=1000)
+        t_10 = dist.threshold_fnr(0.10)
+        t_20 = dist.threshold_fnr(0.20)
+        # Allowing higher FNR should RAISE the threshold
+        self.assertLess(t_10, t_20)
+
+    def test_balanced_threshold_brackets_and_rates(self):
+        pssm = self._pssm()
+        dist = thresholds_mod.ScoreDistribution(pssm=pssm, background=_uniform_bg(), precision=1000)
+        t_bal = dist.threshold_balanced()
+        smin, smax = self._pssm_minmax(pssm)
+        # Balanced threshold should be within feasible score range
+        self.assertGreaterEqual(t_bal, smin)
+        self.assertLessEqual(t_bal, smax)
+
+    def test_patser_defined_and_reasonable(self):
+        pssm = self._pssm()
+        dist = thresholds_mod.ScoreDistribution(pssm=pssm, background=_uniform_bg(), precision=1000)
+        t_pat = dist.threshold_patser()
+        self.assertTrue(isfinite(t_pat))
+        smin, smax = self._pssm_minmax(pssm)
+        self.assertGreaterEqual(t_pat, smin)
+        self.assertLessEqual(t_pat, smax)
 
 if __name__ == "__main__":
     runner = unittest.TextTestRunner(verbosity=2)

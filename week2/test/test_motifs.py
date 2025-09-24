@@ -13,6 +13,9 @@ from math import isfinite
 import tempfile
 import unittest
 import os, sys
+
+'''
+# This code when uncommented runs imports the current up to date biopython module
 try:
     import numpy as np
 except ImportError:
@@ -25,6 +28,21 @@ except ImportError:
 from Bio import motifs
 from Bio.Seq import Seq
 from Bio.motifs import thresholds as thresholds_mod
+'''
+
+# Here are the imports for the versions of the biopython motifs parts that we have locally in the repo and will be ported to codon
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.append(REPO_ROOT)
+
+from week2 import code as motifs                             # <- THIS loads week2/code/__init__.py
+from week2.code import matrix as motifs_matrix
+from week2.code import minimal as motifs_minimal
+from week2.code import thresholds as thresholds_mod
+
+import numpy as np
+from Bio.Seq import Seq
 
 class TestBasic(unittest.TestCase):
     """Basic motif tests."""

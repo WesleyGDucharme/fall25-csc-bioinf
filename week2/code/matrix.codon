@@ -18,20 +18,22 @@ and position-specific scoring matrices.
 
 import math
 
-class GenericPositionMatrix(dict):
+class GenericPositionMatrix:
     """Base class for the support of position matrix operations."""
 
-    def __init__(self, alphabet, values):
+    def __init__(self, alphabet: str, values: Dict[str, List[float]]):
         """Initialize the class."""
+        self.alphabet = ''.join(sorted(list(alphabet)))  # or keep input order if you wish
         self.length = None
-        for letter in alphabet:
+        self._data: Dict[str, List[float]] = {}
+        for ch in self.alphabet:
             if self.length is None:
-                self.length = len(values[letter])
-            elif self.length != len(values[letter]):
+                self.length = len(values[ch])
+            elif self.length != len(values[ch]):
                 raise Exception("data has inconsistent lengths")
-            # Cast possible floats into Python floats:
-            self[letter] = [float(_) for _ in values[letter]]
-        self.alphabet = alphabet
+            # ensure Python floats
+            row = [float(v) for v in values[ch]]
+            self._data[ch] = row
 
     def __str__(self):
         """Return a string containing nucleotides and counts of the alphabet in the Matrix."""
@@ -47,102 +49,39 @@ class GenericPositionMatrix(dict):
 
     def __getitem__(self, key):
         """Return the position matrix of index key."""
-        if isinstance(key, tuple):
-            if len(key) == 2:
-                key1, key2 = key
-                if isinstance(key1, slice):
-                    start1, stop1, stride1 = key1.indices(len(self.alphabet))
-                    indices1 = range(start1, stop1, stride1)
-                    letters1 = [self.alphabet[i] for i in indices1]
-                    dim1 = 2
-                elif isinstance(key1, int):
-                    letter1 = self.alphabet[key1]
-                    dim1 = 1
-                elif isinstance(key1, tuple):
-                    letters1 = [self.alphabet[i] for i in key1]
-                    dim1 = 2
-                elif isinstance(key1, str):
-                    if len(key1) == 1:
-                        letter1 = key1
-                        dim1 = 1
-                    else:
-                        raise KeyError(key1)
-                else:
-                    raise KeyError("Cannot understand key %s" % key1)
-                if isinstance(key2, slice):
-                    start2, stop2, stride2 = key2.indices(self.length)
-                    indices2 = range(start2, stop2, stride2)
-                    dim2 = 2
-                elif isinstance(key2, int):
-                    index2 = key2
-                    dim2 = 1
-                else:
-                    raise KeyError("Cannot understand key %s" % key2)
-                if dim1 == 1 and dim2 == 1:
-                    return dict.__getitem__(self, letter1)[index2]
-                elif dim1 == 1 and dim2 == 2:
-                    values = dict.__getitem__(self, letter1)
-                    return tuple(values[index2] for index2 in indices2)
-                elif dim1 == 2 and dim2 == 1:
-                    d = {}
-                    for letter1 in letters1:
-                        d[letter1] = dict.__getitem__(self, letter1)[index2]
-                    return d
-                else:
-                    d = {}
-                    for letter1 in letters1:
-                        values = dict.__getitem__(self, letter1)
-                        d[letter1] = [values[_] for _ in indices2]
-                    if sorted(letters1) == self.alphabet:
-                        return self.__class__(self.alphabet, d)
-                    else:
-                        return d
-            elif len(key) == 1:
-                key = key[0]
+        if isinstance(key, tuple) and len(key) == 2:
+            a, b = key
+            if a == ':' and isinstance(b, int):
+                # m[:, i]
+                out: Dict[str, float] = {}
+                for ch in self.alphabet:
+                    out[ch] = self._data[ch][b]
+                return out
+            elif isinstance(a, str) and len(a) == 1 and isinstance(b, int):
+                # m['A', i]
+                return self._data[a][b]
             else:
-                raise KeyError("keys should be 1- or 2-dimensional")
-        if isinstance(key, slice):
-            start, stop, stride = key.indices(len(self.alphabet))
-            indices = range(start, stop, stride)
-            letters = [self.alphabet[i] for i in indices]
-            dim = 2
-        elif isinstance(key, int):
-            letter = self.alphabet[key]
-            dim = 1
-        elif isinstance(key, tuple):
-            letters = [self.alphabet[i] for i in key]
-            dim = 2
-        elif isinstance(key, str):
-            if len(key) == 1:
-                letter = key
-                dim = 1
-            else:
-                raise KeyError(key)
+                raise KeyError("Unsupported key")
+        elif isinstance(key, str) and len(key) == 1:
+            return self._data[key]
         else:
-            raise KeyError("Cannot understand key %s" % key)
-        if dim == 1:
-            return dict.__getitem__(self, letter)
-        elif dim == 2:
-            d = {}
-            for letter in letters:
-                d[letter] = dict.__getitem__(self, letter)
-            return d
-        else:
-            raise RuntimeError("Should not get here")
+            raise KeyError("Unsupported key")
+
 
     @property
     def consensus(self):
         """Return the consensus sequence as a string."""
-        sequence = ""
+        seq = []
         for i in range(self.length):
-            maximum = -math.inf
-            for letter in self.alphabet:
-                count = self[letter][i]
-                if count > maximum:
-                    maximum = count
-                    sequence_letter = letter
-            sequence += sequence_letter
-        return sequence
+            best_ch = 'A'
+            best = -1e300
+            for ch in self.alphabet:
+                v = self._data[ch][i]
+                if v > best:
+                    best = v
+                    best_ch = ch
+            seq.append(best_ch)
+        return ''.join(seq)
 
     @property
     def anticonsensus(self):
@@ -273,23 +212,27 @@ class GenericPositionMatrix(dict):
 
 class FrequencyPositionMatrix(GenericPositionMatrix):
     """Class for the support of frequency calculations on the Position Matrix."""
-
     def normalize(self, pseudocounts=None):
-        counts = {}
-        if pseudocounts is None:
-            for letter in self.alphabet:
-                counts[letter] = [0.0] * self.length
-        elif isinstance(pseudocounts, dict):
-            for letter in self.alphabet:
-                counts[letter] = [float(pseudocounts[letter])] * self.length
-        else:
-            for letter in self.alphabet:
-                counts[letter] = [float(pseudocounts)] * self.length
-        for i in range(self.length):
-            for letter in self.alphabet:
-                counts[letter][i] += self[letter][i]
-        return PositionWeightMatrix(self.alphabet, counts)
+        counts: Dict[str, List[float]] = {}
+        for ch in self.alphabet:
+            base = 0.0
+            if isinstance(pseudocounts, dict):
+                base = float(pseudocounts[ch])
+            elif pseudocounts is not None:
+                base = float(pseudocounts)
+            counts[ch] = [base + v for v in self._data[ch]]
 
+        # column normalization
+        L = self.length
+        for i in range(L):
+            col_total = 0.0
+            for ch in self.alphabet:
+                col_total += counts[ch][i]
+            if col_total > 0.0:
+                inv = 1.0 / col_total
+                for ch in self.alphabet:
+                    counts[ch][i] *= inv
+        return PositionWeightMatrix(self.alphabet, counts)
 
 class PositionWeightMatrix(GenericPositionMatrix):
     """Class for the support of weight calculations on the Position Matrix."""
@@ -302,7 +245,7 @@ class PositionWeightMatrix(GenericPositionMatrix):
             for letter in alphabet:
                 self[letter][i] /= total
         for letter in alphabet:
-            self[letter] = tuple(self[letter])
+            self._data[letter] = tuple(self.data[letter])
 
     def log_odds(self, background=None):
         """Return the Position-Specific Scoring Matrix.

@@ -20,27 +20,56 @@ import matrix
 import minimal
 
 def _counts_from_instances(instances, alphabet: str):
-    # Normalize instances to strings and ensure consistent length
-    inst = [str(s) for s in instances]
-    if not inst:
+    # Normalize alphabet into a concrete list of single-character strings
+    if alphabet is None:
+        alphabet = "ACGT"
+    alphabet = str(alphabet).upper()
+
+    letters = []
+    for c in alphabet:
+        if isinstance(c, str) and len(c) == 1:
+            letters.append(c)
+    if not letters:
+        raise ValueError("Alphabet must contain at least one symbol")
+
+    # Normalize instances to strings; skip Nones/empties
+    norm = []
+    for s in instances:
+        if s is None:
+            continue
+        try:
+            ss = str(s)
+        except Exception:
+            continue
+        if not ss:
+            continue
+        norm.append(ss)
+
+    if not norm:
         raise ValueError("No instances provided")
-    L = len(inst[0])
-    for s in inst:
+
+    # Enforce equal length
+    L = len(norm[0])
+    for s in norm:
         if len(s) != L:
             raise ValueError("All instances must have the same length")
 
-    # Initialize counts for every alphabet symbol
-    counts = {ch: [0] * L for ch in alphabet}
+    # Prepare counts explicitly (avoid dict comprehension for Codon)
+    counts = {}
+    for ch in letters:
+        counts[ch] = [0] * L
 
-    # Tolerate case; ignore characters not in the alphabet
-    for s in inst:
+    # Count (case-insensitive); ignore any char not in alphabet
+    for s in norm:
         s_up = s.upper()
-        for i, ch in enumerate(s_up):
-            if ch in counts:
-                counts[ch][i] += 1
-            # else: silently ignore unexpected letters (e.g., 'N')
-            # (matches behavior used in tests)
-
+        # len(s_up) == L by construction
+        for i in range(L):
+            ch = s_up[i]
+            # Guard: only 1-char strings that we prepared in counts
+            if isinstance(ch, str) and len(ch) == 1:
+                if ch in counts:
+                    counts[ch][i] += 1
+                # else: skip unexpected letters (e.g., N, gaps)
     return counts, L
 
 def create(instances, alphabet: str = "ACGT"):
@@ -127,39 +156,38 @@ class Motif:
 
     def __init__(self, alphabet="ACGT", alignment=None, counts=None):
         """Initialize the class."""
-        from . import matrix
-
         self.name = ""
+
         if counts is not None and alignment is not None:
             raise Exception(
                 ValueError, "Specify either counts or an alignment, don't specify both"
             )
-        elif counts is not None:
+
+        if alignment is not None:
+            # Alignment-based construction is out of scope for this port.
+            raise NotImplementedError("Alignment-based Motif init is not supported in Codon port")
+
+        if counts is not None:
             self.alignment = None
             self.counts = matrix.FrequencyPositionMatrix(alphabet, counts)
             self.length = self.counts.length
-        elif alignment is not None:
-            length = alignment.length
-            frequencies = alignment.frequencies
-            for letter in alphabet:
-                if letter not in frequencies:
-                    frequencies[letter] = np.zeros(length, int)
-            self.counts = matrix.FrequencyPositionMatrix(alphabet, frequencies)
-            self.alignment = alignment
-            self.length = length
         else:
             self.counts = None
             self.alignment = None
             self.length = None
+
         self.alphabet = alphabet
         self.pseudocounts = None
         self.background = None
         self.mask = None
 
-    def __get_mask(self):
+    # mask property
+    @property
+    def mask(self):
         return self.__mask
 
-    def __set_mask(self, mask):
+    @mask.setter
+    def mask(self, mask):
         if self.length is None:
             self.__mask = ()
         elif mask is None:
@@ -170,29 +198,27 @@ class Motif:
                 % (len(mask), self.length),
             )
         elif isinstance(mask, str):
-            self.__mask = []
+            tmp = []
             for char in mask:
                 if char == "*":
-                    self.__mask.append(1)
+                    tmp.append(1)
                 elif char == " ":
-                    self.__mask.append(0)
+                    tmp.append(0)
                 else:
                     raise ValueError(
                         "Mask should contain only '*' or ' ' and not a '%s'" % char
                     )
-            self.__mask = tuple(self.__mask)
+            self.__mask = tuple(tmp)
         else:
             self.__mask = tuple(int(bool(c)) for c in mask)
 
-    mask = property(__get_mask, __set_mask)
-    del __get_mask
-    del __set_mask
-
-    def __get_pseudocounts(self):
+    # pseudocounts property
+    @property
+    def pseudocounts(self):
         return self._pseudocounts
 
-    def __set_pseudocounts(self, value):
-        self._pseudocounts = {}
+    @pseudocounts.setter
+    def pseudocounts(self, value):
         if isinstance(value, dict):
             self._pseudocounts = {letter: value[letter] for letter in self.alphabet}
         else:
@@ -200,14 +226,13 @@ class Motif:
                 value = 0.0
             self._pseudocounts = dict.fromkeys(self.alphabet, value)
 
-    pseudocounts = property(__get_pseudocounts, __set_pseudocounts)
-    del __get_pseudocounts
-    del __set_pseudocounts
-
-    def __get_background(self):
+    # background property
+    @property
+    def background(self):
         return self._background
 
-    def __set_background(self, value):
+    @background.setter
+    def background(self, value):
         if isinstance(value, dict):
             self._background = {letter: value[letter] for letter in self.alphabet}
         elif value is None:
@@ -215,21 +240,19 @@ class Motif:
         else:
             if not self._has_dna_alphabet() and not self._has_rna_alphabet():
                 raise ValueError(
-                    "Setting the background to a single value only works for DNA and RNA"
+                    "Setting the background to a single value only works for DNA and RNA "
                     "motifs (in which case the value is interpreted as the GC content)"
                 )
             T_or_U = "T" if self._has_dna_alphabet() else "U"
-            self._background["A"] = (1.0 - value) / 2.0
-            self._background["C"] = value / 2.0
-            self._background["G"] = value / 2.0
-            self._background[T_or_U] = (1.0 - value) / 2.0
+            bg = {}
+            bg["A"] = (1.0 - value) / 2.0
+            bg["C"] = value / 2.0
+            bg["G"] = value / 2.0
+            bg[T_or_U] = (1.0 - value) / 2.0
+            self._background = bg
         total = sum(self._background.values())
         for letter in self.alphabet:
             self._background[letter] /= total
-
-    background = property(__get_background, __set_background)
-    del __get_background
-    del __set_background
 
     def __getitem__(self, key):
         """Return a new Motif object for the positions included in key.
@@ -378,214 +401,49 @@ class Motif:
         alphabet = self.alphabet
         counts = self.counts
         length = self.length
-        values = np.zeros(length)
-        if self.alignment is None:
-            total = np.array(
-                [
-                    sum(counts[c][i] + pseudocounts[c] for c in alphabet)
-                    for i in range(length)
-                ]
-            )
-            for letter, frequencies in counts.items():
-                frequencies = np.array(frequencies) + pseudocounts[letter]
-                mask = frequencies > 0
-                frequencies = frequencies[mask] / total[mask]
-                values[mask] += frequencies * np.log2(frequencies / background[letter])
-        else:
-            total = np.zeros(length)
-            for letter, frequencies in counts.items():
-                total += np.array(frequencies) + pseudocounts[letter]
-            for letter, frequencies in counts.items():
-                frequencies = np.array(frequencies) + pseudocounts[letter]
-                mask = frequencies > 0
-                frequencies = frequencies[mask] / total[mask]
-                values[mask] += frequencies * np.log2(frequencies / background[letter])
+
+        values = [0.0] * (length if length else 0)
+        if length is None or counts is None:
+            return values
+
+        # Compute per-column totals (counts + pseudocounts)
+        totals = []
+        for i in range(length):
+            col_total = 0.0
+            for c in alphabet:
+                col_total += counts[c][i] + pseudocounts[c]
+            totals.append(col_total)
+
+        # Compute sum over letters: p * log2(p / bg)
+        for i in range(length):
+            if totals[i] <= 0:
+                continue
+            for letter in alphabet:
+                freq = counts[letter][i] + pseudocounts[letter]
+                if freq <= 0:
+                    continue
+                p = freq / totals[i]
+                bg = background[letter]
+                # If bg is 0, skip (consistent with log-odds handling in other functions)
+                if bg <= 0:
+                    continue
+                values[i] += p * (math.log(p / bg, 2))
         return values
 
     def weblogo(self, fname, fmt="PNG", version=None, **kwds):
-        """Download and save a weblogo using the Berkeley weblogo service.
-
-        Requires an internet connection.
-
-        The version parameter is deprecated and has no effect.
-
-        The parameters from ``**kwds`` are passed directly to the weblogo server.
-
-        Currently, this method uses WebLogo version 3.3.
-        These are the arguments and their default values passed to
-        WebLogo 3.3; see their website at http://weblogo.threeplusone.com
-        for more information::
-
-            'stack_width' : 'medium',
-            'stacks_per_line' : '40',
-            'alphabet' : 'alphabet_dna',
-            'ignore_lower_case' : True,
-            'unit_name' : "bits",
-            'first_index' : '1',
-            'logo_start' : '1',
-            'logo_end': str(self.length),
-            'composition' : "comp_auto",
-            'percentCG' : '',
-            'scale_width' : True,
-            'show_errorbars' : True,
-            'logo_title' : '',
-            'logo_label' : '',
-            'show_xaxis': True,
-            'xaxis_label': '',
-            'show_yaxis': True,
-            'yaxis_label': '',
-            'yaxis_scale': 'auto',
-            'yaxis_tic_interval' : '1.0',
-            'show_ends' : True,
-            'show_fineprint' : True,
-            'color_scheme': 'color_auto',
-            'symbols0': '',
-            'symbols1': '',
-            'symbols2': '',
-            'symbols3': '',
-            'symbols4': '',
-            'color0': '',
-            'color1': '',
-            'color2': '',
-            'color3': '',
-            'color4': '',
-
-        """
-        if version is not None:
-            warnings.warn(
-                "The version parameter is deprecated and has no effect.",
-                BiopythonDeprecationWarning,
-            )
-
-        if set(self.alphabet) == set("ACDEFGHIKLMNPQRSTVWY"):
-            alpha = "alphabet_protein"
-        elif set(self.alphabet) == set("ACGU"):
-            alpha = "alphabet_rna"
-        elif set(self.alphabet) == set("ACGT"):
-            alpha = "alphabet_dna"
-        else:
-            alpha = "auto"
-
-        frequencies = format(self, "transfac")
-        url = "https://weblogo.threeplusone.com/create.cgi"
-        values = {
-            "sequences": frequencies,
-            "format": fmt.lower(),
-            "stack_width": "medium",
-            "stacks_per_line": "40",
-            "alphabet": alpha,
-            "ignore_lower_case": True,
-            "unit_name": "bits",
-            "first_index": "1",
-            "logo_start": "1",
-            "logo_end": str(self.length),
-            "composition": "comp_auto",
-            "percentCG": "",
-            "scale_width": True,
-            "show_errorbars": True,
-            "logo_title": "",
-            "logo_label": "",
-            "show_xaxis": True,
-            "xaxis_label": "",
-            "show_yaxis": True,
-            "yaxis_label": "",
-            "yaxis_scale": "auto",
-            "yaxis_tic_interval": "1.0",
-            "show_ends": True,
-            "show_fineprint": True,
-            "color_scheme": "color_auto",
-            "symbols0": "",
-            "symbols1": "",
-            "symbols2": "",
-            "symbols3": "",
-            "symbols4": "",
-            "color0": "",
-            "color1": "",
-            "color2": "",
-            "color3": "",
-            "color4": "",
-        }
-
-        values.update({k: "" if v is False else str(v) for k, v in kwds.items()})
-        data = urlencode(values).encode("utf-8")
-        req = Request(url, data)
-        response = urlopen(req)
-        with open(fname, "wb") as f:
-            im = response.read()
-            f.write(im)
+        """Not implemented in Codon port (networked WebLogo)."""
+        raise NotImplementedError("weblogo() is unsupported in Codon port")
 
     def __format__(self, format_spec, **kwargs):
-        """Return a string representation of the Motif in the given format.
-
-        Currently supported formats:
-         - clusterbuster: Cluster Buster position frequency matrix format
-         - pfm : JASPAR single Position Frequency Matrix
-         - jaspar : JASPAR multiple Position Frequency Matrix
-         - transfac : TRANSFAC like files
-
-        """
-        if format_spec in ("pfm", "jaspar"):
-            from Bio.motifs import jaspar
-
-            motifs = [self]
-            return jaspar.write(motifs, format_spec)
-        elif format_spec == "transfac":
-            from Bio.motifs import transfac
-
-            motifs = [self]
-            return transfac.write(motifs)
-        elif format_spec == "clusterbuster":
-            from Bio.motifs import clusterbuster
-
-            motifs = [self]
-            return clusterbuster.write(motifs, **kwargs)
-        elif not format_spec:
-            # Follow python convention and default to using __str__
+        """Formatting not implemented in Codon ported modules."""
+        if not format_spec:
             return str(self)
-        else:
-            raise ValueError("Unknown format type %s" % format_spec)
+        raise NotImplementedError("Motif.__format__ unsupported in Codon port")
 
     def format(self, format_spec):
-        """Return a string representation of the Motif in the given format.
-
-        Currently supported formats:
-         - clusterbuster: Cluster Buster position frequency matrix format
-         - pfm : JASPAR single Position Frequency Matrix
-         - jaspar : JASPAR multiple Position Frequency Matrix
-         - transfac : TRANSFAC like files
-
-        """
         return self.__format__(format_spec)
 
-
 def write(motifs, fmt, **kwargs):
-    """Return a string representation of motifs in the given format.
+    """Not implemented in Codon port."""
+    raise NotImplementedError("write() unsupported in Codon port")
 
-    Currently supported formats (case is ignored):
-     - clusterbuster: Cluster Buster position frequency matrix format
-     - pfm : JASPAR simple single Position Frequency Matrix
-     - jaspar : JASPAR multiple PFM format
-     - transfac : TRANSFAC like files
-
-    """
-    fmt = fmt.lower()
-    if fmt in ("pfm", "jaspar"):
-        from Bio.motifs import jaspar
-
-        return jaspar.write(motifs, fmt)
-    elif fmt == "transfac":
-        from Bio.motifs import transfac
-
-        return transfac.write(motifs)
-    elif fmt == "clusterbuster":
-        from Bio.motifs import clusterbuster
-
-        return clusterbuster.write(motifs, **kwargs)
-    else:
-        raise ValueError("Unknown format type %s" % fmt)
-
-
-if __name__ == "__main__":
-    from Bio._utils import run_doctest
-
-    run_doctest(verbose=0)

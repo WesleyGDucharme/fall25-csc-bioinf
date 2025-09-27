@@ -204,81 +204,6 @@ class GenericPositionMatrix:
         values["C"] = list(reversed(self.get_row("G")))
         return self.__class__(self.alphabet, values)
 
-class FrequencyPositionMatrix(GenericPositionMatrix):
-    """Class for the support of frequency calculations on the Position Matrix."""
-    def normalize(self, pseudocounts=None):
-        counts = {}
-        for ch in self.alphabet:
-            base = 0.0
-            if isinstance(pseudocounts, dict):
-                base = float(pseudocounts[ch])
-            elif pseudocounts is not None:
-                base = float(pseudocounts)
-            counts[ch] = [base + v for v in self._data[ch]]
-
-        # column normalization
-        L = self.length
-        for i in range(L):
-            col_total = 0.0
-            for ch in self.alphabet:
-                col_total += counts[ch][i]
-            if col_total > 0.0:
-                inv = 1.0 / col_total
-                for ch in self.alphabet:
-                    counts[ch][i] *= inv
-        return PositionWeightMatrix(self.alphabet, counts)
-
-class PositionWeightMatrix(GenericPositionMatrix):
-    """Class for the support of weight calculations on the Position Matrix."""
-
-    def __init__(self, alphabet, counts):
-        """Initialize the class."""
-        GenericPositionMatrix.__init__(self, alphabet, counts)
-        # normalize to probabilities column-wise
-        for i in range(self.length):
-            total = 0.0
-            for letter in alphabet:
-                total += self.get_value(letter, i)
-            if total > 0.0:
-                inv = 1.0 / total
-                for letter in alphabet:
-                    self._data[letter][i] *= inv
-
-    def log_odds(self, background=None):
-        """Return the Position-Specific Scoring Matrix.
-
-        The Position-Specific Scoring Matrix (PSSM) contains the log-odds
-        scores computed from the probability matrix and the background
-        probabilities. If the background is None, a uniform background
-        distribution is assumed.
-        """
-        values = {}
-        alphabet = self.alphabet
-        if background is None:
-            background = dict.fromkeys(self.alphabet, 1.0)
-        else:
-            background = dict(background)
-        total = sum(background.values())
-        for letter in alphabet:
-            background[letter] /= total
-            values[letter] = []
-        for i in range(self.length):
-            for letter in alphabet:
-                b = background[letter]
-                if b > 0.0:
-                    p = self.get_value(letter, i)
-                    if p > 0.0:
-                        logodds = math.log(p / b, 2)
-                    else:
-                        logodds = -math.inf
-                else:
-                    p = self.get_value(letter, i)
-                    if p > 0.0:
-                        logodds = math.inf
-                    else:
-                        logodds = math.nan
-                values[letter].append(logodds)
-        return PositionSpecificScoringMatrix(alphabet, values)
 
 class PositionSpecificScoringMatrix(GenericPositionMatrix):
     """Class for the support of Position Specific Scoring Matrix calculations."""
@@ -495,3 +420,76 @@ class PositionSpecificScoringMatrix(GenericPositionMatrix):
         for letter in self.alphabet:
             background[letter] /= total
         return thresholds.ScoreDistribution(precision=precision, pssm=self, background=background)
+
+
+class PositionWeightMatrix(GenericPositionMatrix):
+    """Class for the support of weight calculations on the Position Matrix."""
+
+    def __init__(self, alphabet, counts):
+        """Initialize the class."""
+        GenericPositionMatrix.__init__(self, alphabet, counts)
+        # normalize to probabilities column-wise
+        for i in range(self.length):
+            total = 0.0
+            for letter in alphabet:
+                total += self.get_value(letter, i)
+            if total > 0.0:
+                inv = 1.0 / total
+                for letter in alphabet:
+                    self._data[letter][i] *= inv
+
+    def log_odds(self, background=None):
+        """Return the Position-Specific Scoring Matrix.
+
+        The Position-Specific Scoring Matrix (PSSM) contains the log-odds
+        scores computed from the probability matrix and the background
+        probabilities. If the background is None, a uniform background
+        distribution is assumed.
+        """
+        values = {}
+        alphabet = self.alphabet
+        if background is None:
+            background = dict.fromkeys(self.alphabet, 1.0)
+        else:
+            background = dict(background)
+        total = sum(background.values())
+        for letter in alphabet:
+            background[letter] /= total
+            values[letter] = []
+        for i in range(self.length):
+            for letter in alphabet:
+                b = background[letter]
+                if b > 0.0:
+                    p = self.get_value(letter, i)
+                    if p > 0.0:
+                        logodds = math.log(p / b, 2)
+                    else:
+                        logodds = -math.inf
+                else:
+                    p = self.get_value(letter, i)
+                    if p > 0.0:
+                        logodds = math.inf
+                    else:
+                        logodds = math.nan
+                values[letter].append(logodds)
+        return PositionSpecificScoringMatrix(alphabet, values)
+
+
+class FrequencyPositionMatrix(GenericPositionMatrix[str, list[int]]):
+    """Class for the support of frequency calculations on the Position Matrix."""
+    def normalize(self, pseudocounts=None):
+        counts = {}
+        for ch in self.alphabet:
+            base = 0.0
+            if isinstance(pseudocounts, dict):
+                base = float(pseudocounts[ch])
+            elif pseudocounts is not None:
+                base = float(pseudocounts)
+
+            row = []
+            for v in self._data[ch]:
+               row.append(base + v)
+            counts[ch] = row
+        return PositionWeightMatrix(self.alphabet, counts)
+
+

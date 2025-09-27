@@ -19,21 +19,33 @@ import math
 import matrix
 import minimal
 
-def _counts_from_instances(instances, alphabet: str):
-    # Normalize alphabet into a concrete list of single-character strings
+def _counts_from_instances(instances, alphabet):
+    # Normalize & validate alphabet
     if alphabet is None:
         alphabet = "ACGT"
-    alphabet = str(alphabet).upper()
-
-    letters = []
-    for c in alphabet:
-        if isinstance(c, str) and len(c) == 1:
-            letters.append(c)
-    if not letters:
+    alpha = str(alphabet).upper()
+    if not alpha:
         raise ValueError("Alphabet must contain at least one symbol")
 
-    # Normalize instances to strings; skip Nones/empties
-    norm = []
+    # Build ASCII LUT: map byte -> index in alphabet, -1 means ignore
+    # (Use a fixed-size list for speed; no hashing in the inner loop.)
+    lut = [-1] * 256
+    letters = []  # preserve actual letters for output keys
+    seen = set()
+    for i in range(len(alpha)):
+        ch = alpha[i]
+        # skip duplicates; ensure single ASCII letter
+        if (ch not in seen) and isinstance(ch, str) and len(ch) == 1:
+            b = ord(ch)
+            if 0 <= b < 256:
+                lut[b] = len(letters)
+                letters.append(ch)
+                seen.add(ch)
+    if not letters:
+        raise ValueError("Alphabet must contain at least one valid ASCII symbol")
+
+    # Normalize instances -> ASCII uppercase codepoints (ints), filter empties/non-ASCII
+    norm_codes = []
     for s in instances:
         if s is None:
             continue
@@ -43,33 +55,51 @@ def _counts_from_instances(instances, alphabet: str):
             continue
         if not ss:
             continue
-        norm.append(ss)
 
-    if not norm:
+        # Convert to uppercase ASCII in one pass; skip non-ASCII sequences
+        ok = True
+        codes = [0] * len(ss)
+        for i in range(len(ss)):
+            c = ord(ss[i])
+            if c > 127:
+                ok = False  # non-ASCII; skip this instance
+                break
+            if 97 <= c <= 122:   # 'a'..'z'
+                c -= 32          # to 'A'..'Z'
+            codes[i] = c
+        if ok:
+            norm_codes.append(codes)
+
+    if not norm_codes:
         raise ValueError("No instances provided")
 
     # Enforce equal length
-    L = len(norm[0])
-    for s in norm:
-        if len(s) != L:
+    L = len(norm_codes[0])
+    for cs in norm_codes:
+        if len(cs) != L:
             raise ValueError("All instances must have the same length")
 
-    # Prepare counts explicitly (avoid dict comprehension for Codon)
-    counts = {}
-    for ch in letters:
-        counts[ch] = [0] * L
+    # Prepare counts: list-of-lists for speed; convert to dict at the end
+    K = len(letters)
+    counts_ll = []
+    for _ in range(K):
+        counts_ll.append([0] * L)
 
-    # Count (case-insensitive); ignore any char not in alphabet
-    for s in norm:
-        s_up = s.upper()
-        # len(s_up) == L by construction
+    # Count using LUT (no dict access in the hot loop)
+    for cs in norm_codes:
+        # bs is ASCII-uppercase bytes
         for i in range(L):
-            ch = s_up[i]
-            # Guard: only 1-char strings that we prepared in counts
-            if isinstance(ch, str) and len(ch) == 1:
-                if ch in counts:
-                    counts[ch][i] += 1
-                # else: skip unexpected letters (e.g., N, gaps)
+            b = cs[i]
+            idx = lut[b]
+            if idx >= 0:
+                counts_ll[idx][i] += 1
+            # else: skip
+
+    # Convert to dict[str, List[int]] once (outside hot loop)
+    counts = {}
+    for idx in range(K):
+        counts[letters[idx]] = counts_ll[idx]
+
     return counts, L
 
 def create(instances, alphabet: str = "ACGT"):

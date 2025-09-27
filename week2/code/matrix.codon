@@ -21,11 +21,11 @@ import math
 class GenericPositionMatrix:
     """Base class for the support of position matrix operations."""
 
-    def __init__(self, alphabet: str, values: Dict[str, List[float]]):
+    def __init__(self, alphabet, values):
         """Initialize the class."""
         self.alphabet = ''.join(sorted(list(alphabet)))  # or keep input order if you wish
         self.length = None
-        self._data: Dict[str, List[float]] = {}
+        self._data = {}
         for ch in self.alphabet:
             if self.length is None:
                 self.length = len(values[ch])
@@ -51,22 +51,20 @@ class GenericPositionMatrix:
         """Return the position matrix of index key."""
         if isinstance(key, tuple) and len(key) == 2:
             a, b = key
-            if a == ':' and isinstance(b, int):
-                # m[:, i]
-                out: Dict[str, float] = {}
+            # column access: m[:, i]
+            if isinstance(a, slice) and a.start is None and a.stop is None and a.step is None and isinstance(b, int):
+                out = {}
                 for ch in self.alphabet:
                     out[ch] = self._data[ch][b]
                 return out
-            elif isinstance(a, str) and len(a) == 1 and isinstance(b, int):
-                # m['A', i]
+            # single cell: m['A', i]
+            if isinstance(a, str) and len(a) == 1 and isinstance(b, int):
                 return self._data[a][b]
-            else:
-                raise KeyError("Unsupported key")
+            raise KeyError("Unsupported key")
         elif isinstance(key, str) and len(key) == 1:
             return self._data[key]
         else:
             raise KeyError("Unsupported key")
-
 
     @property
     def consensus(self):
@@ -129,8 +127,11 @@ class GenericPositionMatrix:
         for i in range(self.length):
             def get(nucleotide):
                 return self[nucleotide][i]
-            nucleotides = sorted(self, key=get, reverse=True)
-            counts = [self[c][i] for c in nucleotides]
+            nucleotides = list(self.alphabet)
+            def get(nucleotide):
+                return self._data[nucleotide][i]
+            nucleotides = sorted(self.alphabet, key=get, reverse=True)
+            counts = [self._data[c][i] for c in nucleotides]
             if counts[0] > sum(counts[1:]) and counts[0] > 2 * counts[1]:
                 key = nucleotides[0]
             elif 4 * sum(counts[:2]) > 3 * sum(counts):
@@ -213,7 +214,7 @@ class GenericPositionMatrix:
 class FrequencyPositionMatrix(GenericPositionMatrix):
     """Class for the support of frequency calculations on the Position Matrix."""
     def normalize(self, pseudocounts=None):
-        counts: Dict[str, List[float]] = {}
+        counts = {}
         for ch in self.alphabet:
             base = 0.0
             if isinstance(pseudocounts, dict):
@@ -241,11 +242,13 @@ class PositionWeightMatrix(GenericPositionMatrix):
         """Initialize the class."""
         GenericPositionMatrix.__init__(self, alphabet, counts)
         for i in range(self.length):
-            total = sum(self[letter][i] for letter in alphabet)
+            col_total = 0.0
             for letter in alphabet:
-                self[letter][i] /= total
-        for letter in alphabet:
-            self._data[letter] = tuple(self.data[letter])
+                col_total += self._data[letter][i]
+            if col_total > 0.0:
+                inv = 1.0 / col_total
+                for letter in alphabet:
+                    self._data[letter][i] *= inv
 
     def log_odds(self, background=None):
         """Return the Position-Specific Scoring Matrix.

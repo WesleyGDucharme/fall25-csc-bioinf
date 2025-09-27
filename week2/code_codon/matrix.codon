@@ -1,0 +1,497 @@
+# Copyright 2013 by Michiel de Hoon.  All rights reserved.
+#
+# This file is part of the Biopython distribution and governed by your
+# choice of the "Biopython License Agreement" or the "BSD 3-Clause License".
+# Please see the LICENSE file that should have been included as part of this
+# package.# Copyright 2013 by Michiel de Hoon.  All rights reserved.
+#
+# This file is part of the Biopython distribution and governed by your
+# choice of the "Biopython License Agreement" or the "BSD 3-Clause License".
+# Please see the LICENSE file that should have been included as part of this
+# package.
+
+"""Support for various forms of sequence motif matrices.
+
+Implementation of frequency (count) matrices, position-weight matrices,
+and position-specific scoring matrices.
+"""
+
+import math
+
+class GenericPositionMatrix:
+    """Base class for the support of position matrix operations."""
+
+    def __init__(self, alphabet, values):
+        """Initialize the class."""
+        self.alphabet = ''.join(sorted(list(alphabet)))  # or keep input order if you wish
+        self.length = None
+        self._data = {}
+        for ch in self.alphabet:
+            if self.length is None:
+                self.length = len(values[ch])
+            elif self.length != len(values[ch]):
+                raise Exception("data has inconsistent lengths")
+            # ensure Python floats
+            row = [float(v) for v in values[ch]]
+            self._data[ch] = row
+
+    def get_row(self, letter: str):
+        """Return the entire row (list of floats) for one letter."""
+        return self._data[letter]
+
+    def get_value(self, letter: str, i: int):
+        """Return a single cell value at [letter, i]."""
+        return self._data[letter][i]
+
+    def get_column(self, i: int):
+        """Return a dict {letter: value_at_column_i}."""
+        out = {}
+        for ch in self.alphabet:
+            out[ch] = self._data[ch][i]
+        return out
+
+
+    def __str__(self):
+        """Return a string containing nucleotides and counts of the alphabet in the Matrix."""
+        words = ["%6d" % i for i in range(self.length)]
+        line = "   " + " ".join(words)
+        lines = [line]
+        for letter in self.alphabet:
+            words = ["%6.2f" % self.get_value(letter, i) for i in range(self.length)]
+            line = "%c: " % letter + " ".join(words)
+            lines.append(line)
+        text = "\n".join(lines) + "\n"
+        return text
+
+    @property
+    def consensus(self):
+        """Return the consensus sequence as a string."""
+        seq = []
+        for i in range(self.length):
+            best_ch = None
+            best = -1e300
+            for ch in self.alphabet:
+                v = self.get_value(ch, i)
+                if v > best:
+                    best = v
+                    best_ch = ch
+            seq.append(best_ch)
+        return ''.join(seq)
+
+    @property
+    def anticonsensus(self):
+        """Return the anticonsensus sequence as a string."""
+        seq = []
+        for i in range(self.length):
+            worst_ch = None
+            worst = 1e300
+            for ch in self.alphabet:
+                v = self.get_value(ch, i)
+                if v < worst:
+                    worst = v
+                    worst_ch = ch
+            seq.append(worst_ch)
+        return ''.join(seq)
+
+    @property
+    def degenerate_consensus(self):
+        """Return the degenerate consensus sequence as a string."""
+        degenerate_nucleotide = {
+            "A": "A",
+            "C": "C",
+            "G": "G",
+            "T": "T",
+            "U": "U",
+            "AC": "M",
+            "AG": "R",
+            "AT": "W",
+            "AU": "W",
+            "CG": "S",
+            "CT": "Y",
+            "CU": "Y",
+            "GT": "K",
+            "GU": "K",
+            "ACG": "V",
+            "ACT": "H",
+            "ACU": "H",
+            "AGT": "D",
+            "AGU": "D",
+            "CGT": "B",
+            "CGU": "B",
+            "ACGT": "N",
+            "ACGU": "N",
+        }
+        sequence = ""
+        for i in range(self.length):
+            # sort letters by column value descending
+            nucleotides = sorted(self.alphabet, key=lambda ch: self.get_value(ch, i), reverse=True)
+            counts = [self.get_value(c, i) for c in nucleotides]
+            if counts[0] > sum(counts[1:]) and counts[0] > 2 * counts[1]:
+                key = nucleotides[0]
+            elif 4 * sum(counts[:2]) > 3 * sum(counts):
+                key = "".join(sorted(nucleotides[:2]))
+            elif counts[3] == 0:
+                key = "".join(sorted(nucleotides[:3]))
+            else:
+                key = "ACGT"
+            nucleotide = degenerate_nucleotide.get(key, key)
+            sequence += nucleotide
+        return sequence
+
+    def calculate_consensus(
+        self, substitution_matrix=None, plurality=None, identity=0, setcase=None
+    ):
+        # unchanged logic, returns string
+        alphabet = self.alphabet
+        if set(alphabet).union("ACGTUN-") == set("ACGTUN-"):
+            undefined = "N"
+        else:
+            undefined = "X"
+        if substitution_matrix is None:
+            if plurality is not None:
+                raise ValueError(
+                    "plurality must be None if substitution_matrix is None"
+                )
+            sequence = ""
+            for i in range(self.length):
+                maximum = 0
+                total = 0
+                for letter in alphabet:
+                    count = self.get_value(letter, i)
+                    total += count
+                    if count > maximum:
+                        maximum = count
+                        consensus_letter = letter
+                if maximum < identity * total:
+                    consensus_letter = undefined
+                else:
+                    if setcase is None:
+                        setcase_threshold = total / 2
+                    else:
+                        setcase_threshold = setcase * total
+                    if maximum <= setcase_threshold:
+                        consensus_letter = consensus_letter.lower()
+                sequence += consensus_letter
+        else:
+            raise NotImplementedError(
+                "calculate_consensus currently only supports substitution_matrix=None"
+            )
+        return sequence
+
+    @property
+    def gc_content(self):
+        """Compute the fraction GC content."""
+        gc_total = 0.0
+        total = 0.0
+        for i in range(self.length):
+            for letter in self.alphabet:
+                v = self.get_value(letter, i)
+                if letter in "CG":
+                    gc_total += v
+                total += v
+        return gc_total / total if total > 0 else 0.0
+
+    def reverse_complement(self):
+        """Compute reverse complement."""
+        values = {}
+        if self.alphabet == "ACGU":
+            values["A"] = list(reversed(self.get_row("U")))
+            values["U"] = list(reversed(self.get_row("A")))
+        else:
+            values["A"] = list(reversed(self.get_row("T")))
+            values["T"] = list(reversed(self.get_row("A")))
+        values["G"] = list(reversed(self.get_row("C")))
+        values["C"] = list(reversed(self.get_row("G")))
+        return self.__class__(self.alphabet, values)
+
+class FrequencyPositionMatrix(GenericPositionMatrix):
+    """Class for the support of frequency calculations on the Position Matrix."""
+    def normalize(self, pseudocounts=None):
+        counts = {}
+        for ch in self.alphabet:
+            base = 0.0
+            if isinstance(pseudocounts, dict):
+                base = float(pseudocounts[ch])
+            elif pseudocounts is not None:
+                base = float(pseudocounts)
+            counts[ch] = [base + v for v in self._data[ch]]
+
+        # column normalization
+        L = self.length
+        for i in range(L):
+            col_total = 0.0
+            for ch in self.alphabet:
+                col_total += counts[ch][i]
+            if col_total > 0.0:
+                inv = 1.0 / col_total
+                for ch in self.alphabet:
+                    counts[ch][i] *= inv
+        return PositionWeightMatrix(self.alphabet, counts)
+
+class PositionWeightMatrix(GenericPositionMatrix):
+    """Class for the support of weight calculations on the Position Matrix."""
+
+    def __init__(self, alphabet, counts):
+        """Initialize the class."""
+        GenericPositionMatrix.__init__(self, alphabet, counts)
+        # normalize to probabilities column-wise
+        for i in range(self.length):
+            total = 0.0
+            for letter in alphabet:
+                total += self.get_value(letter, i)
+            if total > 0.0:
+                inv = 1.0 / total
+                for letter in alphabet:
+                    self._data[letter][i] *= inv
+
+    def log_odds(self, background=None):
+        """Return the Position-Specific Scoring Matrix.
+
+        The Position-Specific Scoring Matrix (PSSM) contains the log-odds
+        scores computed from the probability matrix and the background
+        probabilities. If the background is None, a uniform background
+        distribution is assumed.
+        """
+        values = {}
+        alphabet = self.alphabet
+        if background is None:
+            background = dict.fromkeys(self.alphabet, 1.0)
+        else:
+            background = dict(background)
+        total = sum(background.values())
+        for letter in alphabet:
+            background[letter] /= total
+            values[letter] = []
+        for i in range(self.length):
+            for letter in alphabet:
+                b = background[letter]
+                if b > 0.0:
+                    p = self.get_value(letter, i)
+                    if p > 0.0:
+                        logodds = math.log(p / b, 2)
+                    else:
+                        logodds = -math.inf
+                else:
+                    p = self.get_value(letter, i)
+                    if p > 0.0:
+                        logodds = math.inf
+                    else:
+                        logodds = math.nan
+                values[letter].append(logodds)
+        return PositionSpecificScoringMatrix(alphabet, values)
+
+class PositionSpecificScoringMatrix(GenericPositionMatrix):
+    """Class for the support of Position Specific Scoring Matrix calculations."""
+
+    def calculate(self, sequence):
+        """Return the PWM score for a given sequence for all positions."""
+        if sorted(self.alphabet) != ["A", "C", "G", "T"]:
+            raise ValueError(
+                "PSSM has wrong alphabet: %s - Use only with DNA motifs" % self.alphabet
+            )
+        try:
+            s = sequence.decode("ASCII")
+        except AttributeError:
+            s = str(sequence)
+        except Exception:
+            raise ValueError("sequence should be a string or bytes-like object") from None
+
+        s = s.upper()
+        n = len(s)
+        m = self.length
+        if n < m:
+            return []
+
+        out = []
+        letters = ("A", "C", "G", "T")
+        for start in range(0, n - m + 1):
+            total = 0.0
+            bad = False
+            for i in range(m):
+                ch = s[start + i]
+                if ch in letters:
+                    total += self.get_value(ch, i)
+                else:
+                    bad = True
+                    break
+            out.append(float("nan") if bad else total)
+        return out[0] if len(out) == 1 else out
+
+
+    def search(self, sequence, threshold=0.0, both=True, chunksize=10**6):
+        """Find hits with PWM score above given threshold (generator)."""
+        seq = str(sequence).upper()
+        seq_len = len(seq)
+        motif_l = self.length
+
+        # precompute forward scores by chunks
+        def _scan_forward(seq_chunk, offset0):
+            scores = self.calculate(seq_chunk)
+            # scores is list/float; normalize to list
+            if isinstance(scores, float):
+                scores = [scores]
+            for i, sc in enumerate(scores):
+                if sc >= threshold:
+                    yield offset0 + i, sc
+
+        # reverse complement PSSM if needed
+        rc = self.reverse_complement() if both else None
+
+        # chunked scanning
+        step = chunksize
+        for chunk_start in range(0, seq_len, step):
+            end = min(seq_len, chunk_start + step + motif_l - 1)
+            subseq = seq[chunk_start:end]
+
+            # forward strand
+            for pos, sc in _scan_forward(subseq, chunk_start):
+                yield (pos, sc)
+
+            # reverse strand: positions are reported as negative offsets like Biopython
+            if both:
+                r_scores = rc.calculate(subseq)
+                if isinstance(r_scores, float):
+                    r_scores = [r_scores]
+                for i, sc in enumerate(r_scores):
+                    if sc >= threshold:
+                        # Biopython yields negative coord = position relative to reverse
+                        yield (-(chunk_start + i), sc)
+
+    @property
+    def max(self):
+        score = 0.0
+        for position in range(self.length):
+            best = -1e300
+            for letter in self.alphabet:
+                v = self.get_value(letter, position)
+                if v > best:
+                    best = v
+            score += best
+        return score
+
+    @property
+    def min(self):
+        score = 0.0
+        for position in range(self.length):
+            worst = 1e300
+            for letter in self.alphabet:
+                v = self.get_value(letter, position)
+                if v < worst:
+                    worst = v
+            score += worst
+        return score
+
+    @property
+    def gc_content(self):
+        """Compute the GC-ratio."""
+        raise Exception("Cannot compute the %GC composition of a PSSM")
+
+    def mean(self, background=None):
+        """Return expected value of the score of a motif."""
+        if background is None:
+            background = dict.fromkeys(self.alphabet, 1.0)
+        else:
+            background = dict(background)
+        total = sum(background.values())
+        for letter in self.alphabet:
+            background[letter] /= total
+        sx = 0.0
+        for i in range(self.length):
+            for letter in self.alphabet:
+                logodds = self.get_value(letter, i)
+                if math.isnan(logodds):
+                    continue
+                if math.isinf(logodds) and logodds < 0:
+                    continue
+                b = background[letter]
+                p = b * math.pow(2, logodds)
+                sx += p * logodds
+        return sx
+
+    def std(self, background=None):
+        """Return standard deviation of the score of a motif."""
+        if background is None:
+            background = dict.fromkeys(self.alphabet, 1.0)
+        else:
+            background = dict(background)
+        total = sum(background.values())
+        for letter in self.alphabet:
+            background[letter] /= total
+        variance = 0.0
+        for i in range(self.length):
+            sx = 0.0
+            sxx = 0.0
+            for letter in self.alphabet:
+                logodds = self.get_value(letter, i)
+                if math.isnan(logodds):
+                    continue
+                if math.isinf(logodds) and logodds < 0:
+                    continue
+                b = background[letter]
+                p = b * math.pow(2, logodds)
+                sx += p * logodds
+                sxx += p * logodds * logodds
+            sxx -= sx * sx
+            variance += sxx
+        variance = max(variance, 0)
+        return math.sqrt(variance)
+
+    def dist_pearson(self, other):
+        """Return the similarity score based on pearson correlation for the given motif against self.
+
+        We use the Pearson's correlation of the respective probabilities.
+        """
+        if self.alphabet != other.alphabet:
+            raise ValueError("Cannot compare motifs with different alphabets")
+        max_p = -2.0
+        max_o = 0
+        for offset in range(-self.length + 1, other.length):
+            if offset < 0:
+                p = self.dist_pearson_at(other, -offset)
+            else:
+                p = other.dist_pearson_at(self, offset)
+            if max_p < p:
+                max_p = p
+                max_o = -offset
+        return 1 - max_p, max_o
+
+    def dist_pearson_at(self, other, offset):
+        """Return the similarity score based on pearson correlation at the given offset."""
+        letters = self.alphabet
+        sx = 0.0
+        sy = 0.0
+        sxx = 0.0
+        sxy = 0.0
+        syy = 0.0
+        norm = max(self.length, offset + other.length) * len(letters)
+        for pos in range(min(self.length - offset, other.length)):
+            xi = [self.get_value(letter, pos + offset) for letter in letters]
+            yi = [other.get_value(letter, pos) for letter in letters]
+            sx += sum(xi)
+            sy += sum(yi)
+            sxx += sum(x * x for x in xi)
+            sxy += sum(x * y for x, y in zip(xi, yi))
+            syy += sum(y * y for y in yi)
+        sx /= norm
+        sy /= norm
+        sxx /= norm
+        sxy /= norm
+        syy /= norm
+        numerator = sxy - sx * sy
+        denominator = math.sqrt((sxx - sx * sx) * (syy - sy * sy))
+        return numerator / denominator
+
+
+
+
+    def distribution(self, background=None, precision=10**3):
+        """Calculate the distribution of the scores at the given precision."""
+        import thresholds  # sibling Codon module
+        if background is None:
+            background = dict.fromkeys(self.alphabet, 1.0)
+        else:
+            background = dict(background)
+        total = sum(background.values())
+        for letter in self.alphabet:
+            background[letter] /= total
+        return thresholds.ScoreDistribution(precision=precision, pssm=self, background=background)

@@ -20,7 +20,6 @@ import math
 
 class GenericPositionMatrix:
     """Base class for the support of position matrix operations."""
-
     def __init__(self, alphabet, values):
         """Initialize the class."""
         self.alphabet = ''.join(sorted(list(alphabet)))  # or keep input order if you wish
@@ -193,7 +192,7 @@ class GenericPositionMatrix:
 
     def reverse_complement(self):
         """Compute reverse complement."""
-        values = {}
+        valuesi: dict[str, list[float]] = {}
         if self.alphabet == "ACGU":
             values["A"] = list(reversed(self.get_row("U")))
             values["U"] = list(reversed(self.get_row("A")))
@@ -240,7 +239,7 @@ class PositionSpecificScoringMatrix(GenericPositionMatrix):
                     bad = True
                     break
             out.append(float("nan") if bad else total)
-        return out[0] if len(out) == 1 else out
+        return out
 
 
     def search(self, sequence, threshold=0.0, both=True, chunksize=10**6):
@@ -252,9 +251,7 @@ class PositionSpecificScoringMatrix(GenericPositionMatrix):
         # precompute forward scores by chunks
         def _scan_forward(seq_chunk, offset0):
             scores = self.calculate(seq_chunk)
-            # scores is list/float; normalize to list
-            if isinstance(scores, float):
-                scores = [scores]
+
             for i, sc in enumerate(scores):
                 if sc >= threshold:
                     yield offset0 + i, sc
@@ -430,13 +427,13 @@ class PositionWeightMatrix(GenericPositionMatrix):
         GenericPositionMatrix.__init__(self, alphabet, counts)
         # normalize to probabilities column-wise
         for i in range(self.length):
-            total = 0.0
+            total: float = 0.0
             for letter in alphabet:
-                total += self.get_value(letter, i)
+                total += float(self.get_value(letter, i))
             if total > 0.0:
-                inv = 1.0 / total
+                inv: float = 1.0 / total
                 for letter in alphabet:
-                    self._data[letter][i] *= inv
+                    self._data[letter][i] = float(self._data[letter][i]) * inv
 
     def log_odds(self, background=None):
         """Return the Position-Specific Scoring Matrix.
@@ -475,21 +472,19 @@ class PositionWeightMatrix(GenericPositionMatrix):
         return PositionSpecificScoringMatrix(alphabet, values)
 
 
-class FrequencyPositionMatrix(GenericPositionMatrix[str, list[int]]):
+class FrequencyPositionMatrix(GenericPositionMatrix):
     """Class for the support of frequency calculations on the Position Matrix."""
     def normalize(self, pseudocounts=None):
-        counts = {}
+        counts: dict[str, list[float]] = {}
         for ch in self.alphabet:
-            base = 0.0
+            base: float = 0.0
             if isinstance(pseudocounts, dict):
                 base = float(pseudocounts[ch])
             elif pseudocounts is not None:
                 base = float(pseudocounts)
 
-            row = []
+            row: list[float] = []
             for v in self._data[ch]:
-               row.append(base + v)
+                row.append(base + float(v))
             counts[ch] = row
         return PositionWeightMatrix(self.alphabet, counts)
-
-

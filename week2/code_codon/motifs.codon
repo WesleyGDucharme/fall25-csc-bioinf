@@ -467,9 +467,50 @@ class Motif:
 
     def __format__(self, format_spec, **kwargs):
         """Formatting not implemented in Codon ported modules."""
-        if not format_spec:
+        f = (format_spec or "").lower()
+        if not f:
             return str(self)
-        raise NotImplementedError("Motif.__format__ unsupported in Codon port")
+
+        if self.counts is None or self.length is None:
+            raise ValueError("No counts available to format")
+
+        # Helper to format one row of floats like "  1.00   0.00 ..."
+        def _fmt_row(vals):
+            return " ".join("%6.2f" % float(v) for v in vals)
+
+        if f == "pfm":
+            # Four lines (in self.alphabet order), no row labels, trailing newline.
+            lines = []
+            for letter in self.alphabet:
+                row = [self.counts.get_value(letter, i) for i in range(self.length)]
+                lines.append(_fmt_row(row))
+            return "\n".join(lines) + "\n"
+
+        if f == "jaspar":
+            # Header: ><id> <name>  (id is None in your tests)
+            header = f">{self.__dict__.get('accession', None)} {self.name}".rstrip()
+            lines = [header]
+            for letter in self.alphabet:
+                row = [self.counts.get_value(letter, i) for i in range(self.length)]
+                lines.append(f"{letter} [ {_fmt_row(row)}]")
+            return "\n".join(lines) + "\n"
+
+        if f == "transfac":
+            # Header
+            lines = ["P0      " + "      ".join(self.alphabet)]
+            # Body: index 01..N with integer counts and consensus letter at end
+            for i in range(self.length):
+                # counts per column in alphabet order
+                col_vals = [self.counts.get_value(letter, i) for letter in self.alphabet]
+                ints = [str(int(round(v))) for v in col_vals]
+                # consensus = letter with max count; ties pick first by order
+                max_idx = max(range(len(col_vals)), key=lambda k: col_vals[k])
+                consensus = self.alphabet[max_idx]
+                lines.append(f"{i+1:02d}      " + "      ".join(ints) + f"      {consensus}")
+            lines += ["XX", "//"]
+            return "\n".join(lines) + "\n"
+
+        raise ValueError(f"Unknown motif format: {format_spec!r}")
 
     def format(self, format_spec):
         return self.__format__(format_spec)

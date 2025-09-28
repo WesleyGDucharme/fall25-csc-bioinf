@@ -81,6 +81,14 @@ class GenericPositionMatrix:
 
         raise KeyError(f"Cannot understand key {key!r}")
 
+    def get_value(self, letter, i):
+        """Return the scalar at row `letter` and column index `i` as float."""
+        return float(self._data[letter][i])
+
+    def get_row(self, letter):
+        """Return a copy of the row for `letter` as a list of floats."""
+        return list(self._data[letter])
+
     def __str__(self):
         """Return a string containing nucleotides and counts of the alphabet in the Matrix."""
         words = ["%6d" % i for i in range(self.length)]

@@ -15,16 +15,17 @@
 Implementation of frequency (count) matrices, position-weight matrices,
 and position-specific scoring matrices.
 """
-
+from typing import Dict, List, Optional
 import math
 
 class GenericPositionMatrix:
+
     """Base class for the support of position matrix operations."""
     def __init__(self, alphabet, values):
         """Initialize the class."""
-        self.alphabet = ''.join(sorted(list(alphabet)))  # or keep input order if you wish
-        self.length = None
-        self._data = {}
+        self.alphabet: str = ''.join(alphabet)  # or keep input order if you wish
+        self.length: Optional[int] = None
+        self._data: Dict[str, List[float]] = {}
         for ch in self.alphabet:
             if self.length is None:
                 self.length = len(values[ch])
@@ -34,21 +35,51 @@ class GenericPositionMatrix:
             row = [float(v) for v in values[ch]]
             self._data[ch] = row
 
-    def get_row(self, letter: str):
-        """Return the entire row (list of floats) for one letter."""
-        return self._data[letter]
+    def __getitem__(self, key):
+        """
+        Support Biopython-style indexing:
+          m["A"]                  -> full list of values for row A
+          m["A", 3]               -> scalar at row A, column 3
+          m[:, 3]                 -> dict {letter: value_at_column_3} for all rows
+          m[:, 2:5]               -> sub-matrix (same type) with selected columns
+          m["ACG", :]             -> sub-matrix with only these rows
+          m[("A","C"), 0:4]       -> sub-matrix with selected rows and column slice
+        """
+        # 1D: m["A"]
+        if isinstance(key, str) and len(key) == 1:
+            return list(self._data[key])
 
-    def get_value(self, letter: str, i: int):
-        """Return a single cell value at [letter, i]."""
-        return self._data[letter][i]
+        # 2D form
+        if isinstance(key, tuple) and len(key) == 2:
+            rows, cols = key
 
-    def get_column(self, i: int):
-        """Return a dict {letter: value_at_column_i}."""
-        out = {}
-        for ch in self.alphabet:
-            out[ch] = self._data[ch][i]
-        return out
+            # normalize rows selector
+            if isinstance(rows, slice) and rows == slice(None, None, None):
+                row_keys = list(self.alphabet)
+            elif isinstance(rows, str):
+                row_keys = [rows]
+            elif isinstance(rows, (list, tuple)):
+                row_keys = list(rows)
+            else:
+                raise KeyError(f"Unsupported row selector {rows!r}")
 
+            # single-column access: return dict or scalar
+            if isinstance(cols, int):
+                if len(row_keys) == 1:
+                    return self._data[row_keys[0]][cols]
+                return {ch: self._data[ch][cols] for ch in row_keys}
+
+            # column slice → return a sub-matrix
+            if isinstance(cols, slice):
+                new_counts = {
+                    ch: self._data[ch][cols.start or 0 : cols.stop or self.length]
+                    for ch in row_keys
+                }
+                return self.__class__(''.join(row_keys), new_counts)
+
+            raise KeyError(f"Unsupported column selector {cols!r}")
+
+        raise KeyError(f"Cannot understand key {key!r}")
 
     def __str__(self):
         """Return a string containing nucleotides and counts of the alphabet in the Matrix."""
@@ -475,16 +506,17 @@ class PositionWeightMatrix(GenericPositionMatrix):
 class FrequencyPositionMatrix(GenericPositionMatrix):
     """Class for the support of frequency calculations on the Position Matrix."""
     def normalize(self, pseudocounts=None):
-        counts: dict[str, list[float]] = {}
+        counts = {}
         for ch in self.alphabet:
-            base: float = 0.0
+            base = 0.0
             if isinstance(pseudocounts, dict):
                 base = float(pseudocounts[ch])
             elif pseudocounts is not None:
                 base = float(pseudocounts)
 
-            row: list[float] = []
+            row = []
             for v in self._data[ch]:
                 row.append(base + float(v))
             counts[ch] = row
         return PositionWeightMatrix(self.alphabet, counts)
+

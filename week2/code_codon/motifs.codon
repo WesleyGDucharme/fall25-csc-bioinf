@@ -14,7 +14,7 @@ as well as methods for motif comparisons and motif searching in sequences.
 It also includes functionality for parsing output from the AlignACE, MEME,
 and MAST programs, as well as files in the TRANSFAC format.
 """
-from typing import Optional, List
+from typing import Optional, List, Dict
 import math
 import matrix
 import minimal
@@ -189,6 +189,8 @@ class Motif:
     alignment: Optional[List[str]]
     _background: Optional[Dict[str, float]]
     _pseudocounts: Optional[Dict[str, float]]
+    num_occurrences: Optional[int]
+    evalue: Optional[float]
     name: str
     alphabet: str
     counts: Optional[GenericPositionMatrix]
@@ -200,6 +202,8 @@ class Motif:
         """Initialize the class."""
         self._background = None
         self._pseudocounts = None
+        self.num_occurrences = None
+        self.evalue = None
         self.name = ""
         self.alphabet = alphabet
         self.counts = None
@@ -218,11 +222,22 @@ class Motif:
             )
 
         if counts is not None:
-            # Build frequency matrix from float counts
-            float_counts = {ch: [float(v) for v in row] for ch, row in counts.items()}
+            self.alignment = None
+            float_counts = {}
+            
+            for ch in self.alphabet:
+                if hasattr(counts, "_data"):  # GenericPositionMatrix
+                    row_src = counts.get_row(ch)  
+                else:
+                    row_src = counts[ch]  # assumed dict-like mapping: src[ch]
+
+                # Floatify by alphabet (no `.items()` needed)
+                float_counts[ch] = [float(v) for v in row_src]
+
+            # Ensure we always end up with a GenericPositionMatrix
             self.counts = matrix.make_fpm(self.alphabet, float_counts)
             self.length = self.counts.length
-            self.mask = [False] * self.length  # keep mask as a list, not None
+            self.mask = [False] * self.length
 
     # mask property
     @property
@@ -551,6 +566,59 @@ class Motif:
 
     def format(self, format_spec):
         return self.__format__(format_spec)
+
+
+class Record:
+    """Container for minimal MEME results, list-like over motifs."""
+
+    # meta fields
+    name: Optional[str]
+    alphabet: Optional[str]
+    version: Optional[str]
+    background: Optional[Dict[str, float]]
+    datafile: str
+    command: str
+    instances: List[str]
+
+    _motifs: List[Motif]
+
+    def __init__(self):
+        # per-instance list (avoid sharing class placeholder)
+        self._motifs = []
+
+        self.name = None
+        self.alphabet = None
+        self.version = None
+        self.background = None
+        self.datafile = ""
+        self.command = ""
+        self.instances = []
+        self._motifs = []
+
+    # list-like API
+    def __len__(self):
+        return len(self._motifs)
+
+    def __iter__(self):
+        return iter(self._motifs)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            for motif in self._motifs:
+                if getattr(motif, "name", None) == key:
+                    return motif
+            raise KeyError(f"Motif named '{key}' not found")
+        return self._motifs[key]
+
+    def append(self, motif: Motif) -> None:
+        self._motifs.append(motif)
+
+    def extend(self, motifs: List[Motif]) -> None:
+        self._motifs.extend(motifs)
+
+    def clear(self) -> None:
+        self._motifs.clear()
+
 
 def write(motifs, fmt, **kwargs):
     """Not implemented in Codon port."""

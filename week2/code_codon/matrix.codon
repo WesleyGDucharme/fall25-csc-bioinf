@@ -106,17 +106,19 @@ class GenericPositionMatrix:
     @property
     def consensus(self):
         """Return the consensus sequence as a string."""
-        seq = []
+        if self.length is None or self.length == 0:
+            return ""
+
+        out = []
         for i in range(self.length):
-            best_ch = None
-            best = -1e300
-            for ch in self.alphabet:
-                v = self.get_value(ch, i)
-                if v > best:
-                    best = v
-                    best_ch = ch
-            seq.append(best_ch)
-        return ''.join(seq)
+            best_ch = self.alphabet[0]
+            best_v = float(self._data[best_ch][i])
+            for ch in self.alphabet[1:]:
+                v = float(self._data[ch][i])
+                if v > best_v or (v == best_v and ch < best_ch):
+                    best_ch, best_v = ch, v
+            out.append(best_ch)
+        return "".join(out)
 
     @property
     def anticonsensus(self):

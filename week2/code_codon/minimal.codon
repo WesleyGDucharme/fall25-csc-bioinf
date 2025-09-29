@@ -17,6 +17,7 @@ def read(handle):
 
     This function won't retrieve instances, as there are none in minimal meme format.
     """
+    import motifs
     from motifs import Motif, Record
     motif_number = 0
     record = Record()

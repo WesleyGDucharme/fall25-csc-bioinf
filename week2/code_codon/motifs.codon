@@ -17,7 +17,6 @@ and MAST programs, as well as files in the TRANSFAC format.
 from typing import Optional, List, Dict
 import math
 import matrix
-import minimal
 from matrix import GenericPositionMatrix
 
 def _counts_from_instances(instances, alphabet):
@@ -119,6 +118,7 @@ def parse(handle, fmt, strict=True):
 
     Other formats are out of scope for these ported modules and will raise.
     """
+    import minimal
     f = fmt.lower()
     if f == "minimal":
         # Use the local Codon minimal parser
@@ -385,6 +385,38 @@ class Motif:
         else:
             return self.length
 
+    def __eq__(self, other):
+        # Only motifs are comparable
+        if not isinstance(other, Motif):
+            return False
+
+        # Quick checks
+        if self.alphabet != other.alphabet:
+            return False
+        if self.length != other.length:
+            return False
+
+        # Compare names if both set
+        name_self = self.name
+        name_other = other.name
+        if name_self != name_other:
+            return False
+
+        # Compare counts element-wise
+        if (self.counts is None) != (other.counts is None):
+            return False
+        if self.counts is not None:
+            for ch in self.alphabet:
+                row_a = self.counts.get_row(ch)
+                row_b = other.counts.get_row(ch)
+                if len(row_a) != len(row_b):
+                    return False
+                for xa, xb in zip(row_a, row_b):
+                    if abs(float(xa) - float(xb)) > 1e-9:
+                        return False
+
+        return True
+
     def _has_dna_alphabet(self):
         return sorted(self.alphabet) == ["A", "C", "G", "T"]
 
@@ -401,7 +433,7 @@ class Motif:
 
         T_or_U = "T" if self._has_dna_alphabet() else "U"
 
-        # --- counts path (always available in our port) ---
+        # counts path
         # Build reverse-complemented counts by swapping rows and reversing columns.
         counts = {
             "A": self.counts[T_or_U][::-1],
@@ -579,6 +611,7 @@ class Record:
     datafile: str
     command: str
     instances: List[str]
+    sequences: List[str]
 
     _motifs: List[Motif]
 
@@ -593,6 +626,7 @@ class Record:
         self.datafile = ""
         self.command = ""
         self.instances = []
+        self.sequences = []
         self._motifs = []
 
     # list-like API
@@ -602,13 +636,14 @@ class Record:
     def __iter__(self):
         return iter(self._motifs)
 
-    def __getitem__(self, key):
-        if isinstance(key, str):
-            for motif in self._motifs:
-                if getattr(motif, "name", None) == key:
-                    return motif
-            raise KeyError(f"Motif named '{key}' not found")
+    def __getitem__(self, key: int):
         return self._motifs[key]
+
+    def __getitem__(self, key: str):
+        for motif in self._motifs:
+            if motif.name == key:
+                return motif
+        raise KeyError(f"Motif named '{key}' not found")
 
     def append(self, motif: Motif) -> None:
         self._motifs.append(motif)

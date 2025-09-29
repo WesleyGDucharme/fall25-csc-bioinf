@@ -193,7 +193,6 @@ class Motif:
     alphabet: str
     counts: Optional[GenericPositionMatrix]
     length: Optional[int]
-    pseudocounts: Optional[Dict[str, float]]
     background: Optional[Dict[str, float]]
     mask: List[bool]
 
@@ -205,7 +204,6 @@ class Motif:
         self.alphabet = alphabet
         self.counts = None
         self.length = None
-        self.pseudocounts = None
         self.background = None
         self.mask = []  # always a sequence; never None
 
@@ -266,13 +264,16 @@ class Motif:
 
     @pseudocounts.setter
     def pseudocounts(self, value):
-        if isinstance(value, dict):
-            self._pseudocounts = {letter: float(value.get(letter, 0.0)) for letter in self.alphabet}
+        if value is None:
+            # zeros per letter
+            self._pseudocounts = {ch: 0.0 for ch in self.alphabet}
+        elif isinstance(value, dict):
+            # coerce to float and fill missing with 0.0
+            self._pseudocounts = {ch: float(value.get(ch, 0.0)) for ch in self.alphabet}
         else:
-            if value is None:
-                value = 0.0
+            # scalar → expand per letter
             b = float(value)
-            self._pseudocounts = {letter: b for letter in self.alphabet}
+            self._pseudocounts = {ch: b for ch in self.alphabet}
 
     # background property
     @property
@@ -344,7 +345,9 @@ class Motif:
     @property
     def pwm(self):
         """Calculate and return the position weight matrix for this motif."""
-        return self.counts.normalize(self._pseudocounts)
+        if self.counts is None:
+            raise ValueError("No counts set for this motif")
+        return matrix.fpm_normalize(self.counts, self._pseudocounts)
 
     @property
     def pssm(self):
@@ -375,26 +378,49 @@ class Motif:
 
     def reverse_complement(self):
         """Return the reverse complement of the motif as a new motif."""
-        alphabet = self.alphabet
+        # Only DNA/RNA supported
         if not self._has_dna_alphabet() and not self._has_rna_alphabet():
             raise ValueError(
                 "Calculating reverse complement only works for DNA and RNA motifs"
             )
+
         T_or_U = "T" if self._has_dna_alphabet() else "U"
+
+        # --- counts path (always available in our port) ---
+        # Build reverse-complemented counts by swapping rows and reversing columns.
+        counts = {
+            "A": self.counts[T_or_U][::-1],
+            "C": self.counts["G"][::-1],
+            "G": self.counts["C"][::-1],
+            T_or_U: self.counts["A"][::-1],
+        }
+
+        # Create result motif from counts (alignment-based __init__ is not supported)
+        res = Motif(alphabet=self.alphabet, counts=counts)
+
+        # --- optional alignment mirroring (safe for our list[str] alignment) ---
         if self.alignment is not None:
-            alignment = self.alignment.reverse_complement()
-            if T_or_U == "U":
-                alignment.sequences = [s.replace("T", "U") for s in alignment.sequences]
-            res = Motif(alphabet=alphabet, alignment=alignment)
-        else:  # has counts
-            counts = {
-                "A": self.counts[T_or_U][::-1],
-                "C": self.counts["G"][::-1],
-                "G": self.counts["C"][::-1],
-                T_or_U: self.counts["A"][::-1],
-            }
-            res = Motif(alphabet=alphabet, counts=counts)
-        res.mask = self.mask[::-1]
+            # choose complement map
+            if self._has_dna_alphabet():
+                comp = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A'}
+            else:
+                comp = {'A': 'U', 'C': 'G', 'G': 'C', 'U': 'A'}
+
+            def rc(seq: str) -> str:
+                return ''.join(comp.get(ch, ch) for ch in reversed(seq))
+
+            res.alignment = [rc(s) for s in self.alignment]
+
+        # --- mask (make robust to None / length mismatches) ---
+        if self.mask is None:
+            res.mask = [False] * res.length
+        else:
+            m = list(self.mask)
+            if len(m) != res.length:
+                m = [False] * res.length
+            res.mask = m[::-1]
+
+        # --- background & pseudocounts mirrored to RC letters ---
         res.background = {
             "A": self.background[T_or_U],
             "C": self.background["G"],

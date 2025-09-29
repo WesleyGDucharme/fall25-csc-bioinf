@@ -14,10 +14,11 @@ as well as methods for motif comparisons and motif searching in sequences.
 It also includes functionality for parsing output from the AlignACE, MEME,
 and MAST programs, as well as files in the TRANSFAC format.
 """
-
+from typing import Optional, List
 import math
 import matrix
 import minimal
+from matrix import GenericPositionMatrix
 
 def _counts_from_instances(instances, alphabet):
     # Normalize & validate alphabet
@@ -105,8 +106,10 @@ def _counts_from_instances(instances, alphabet):
 def create(instances, alphabet: str = "ACGT"):
     """Create a Motif object from a list of sequence strings."""
     counts, _ = _counts_from_instances(instances, alphabet)
-    return Motif(alphabet=alphabet, counts=counts)
-
+    m = Motif(alphabet=alphabet, counts=counts)
+    # Keep alignment for tests/relative_entropy expectations:
+    m.alignment = [str(s).upper() for s in instances]
+    return m
 
 def parse(handle, fmt, strict=True):
     """Parse an output file from a motif finding program (Codon port).
@@ -183,46 +186,57 @@ def read(handle, fmt, strict=True):
 
 class Motif:
     """A class representing sequence motifs."""
+    alignment: Optional[List[str]]
+    _background: Optional[Dict[str, float]]
+    _pseudocounts: Optional[Dict[str, float]]
+    name: str
+    alphabet: str
+    counts: Optional[GenericPositionMatrix]
+    length: Optional[int]
+    pseudocounts: Optional[Dict[str, float]]
+    background: Optional[Dict[str, float]]
+    mask: List[bool]
 
-    def __init__(self, alphabet="ACGT", alignment=None, counts=None):
+    def __init__(self, alphabet: str ="ACGT", alignment=None, counts=None):
         """Initialize the class."""
+        self._background = None
+        self._pseudocounts = None
         self.name = ""
+        self.alphabet = alphabet
+        self.counts = None
+        self.length = None
+        self.pseudocounts = None
+        self.background = None
+        self.mask = []  # always a sequence; never None
 
+        # Validate inputs (mutually exclusive)
         if counts is not None and alignment is not None:
-            raise Exception(
-                ValueError, "Specify either counts or an alignment, don't specify both"
-            )
+            raise ValueError("Specify either counts or an alignment, don't specify both")
 
         if alignment is not None:
             # Alignment-based construction is out of scope for this port.
-            raise NotImplementedError("Alignment-based Motif init is not supported in Codon port")
+            raise NotImplementedError(
+                "Alignment-based Motif init is not supported in Codon port"
+            )
 
         if counts is not None:
-            self.alignment = None
+            # Build frequency matrix from float counts
             float_counts = {ch: [float(v) for v in row] for ch, row in counts.items()}
-            self.counts = matrix.FrequencyPositionMatrix(alphabet, float_counts)
+            self.counts = matrix.make_fpm(self.alphabet, float_counts)
             self.length = self.counts.length
-        else:
-            self.counts = None
-            self.alignment = None
-            self.length = None
-
-        self.alphabet = alphabet
-        self.pseudocounts = None
-        self.background = None
-        self.mask = None
+            self.mask = [False] * self.length  # keep mask as a list, not None
 
     # mask property
     @property
     def mask(self):
-        return self.__mask
+        return self.mask
 
     @mask.setter
     def mask(self, mask):
         if self.length is None:
-            self.__mask = ()
+            self.mask = ()
         elif mask is None:
-            self.__mask = (1,) * self.length
+            self.mask = (1,) * self.length
         elif len(mask) != self.length:
             raise ValueError(
                 "The length (%d) of the mask is inconsistent with the length (%d) of the motif"
@@ -239,23 +253,26 @@ class Motif:
                     raise ValueError(
                         "Mask should contain only '*' or ' ' and not a '%s'" % char
                     )
-            self.__mask = tuple(tmp)
+            self.mask = tuple(tmp)
         else:
-            self.__mask = tuple(int(bool(c)) for c in mask)
+            self.mask = tuple(int(bool(c)) for c in mask)
 
     # pseudocounts property
     @property
     def pseudocounts(self):
+        if self._pseudocounts is None:
+            return {ch: 0.0 for ch in self.alphabet}
         return self._pseudocounts
 
     @pseudocounts.setter
     def pseudocounts(self, value):
         if isinstance(value, dict):
-            self._pseudocounts = {letter: value[letter] for letter in self.alphabet}
+            self._pseudocounts = {letter: float(value.get(letter, 0.0)) for letter in self.alphabet}
         else:
             if value is None:
                 value = 0.0
-            self._pseudocounts = dict.fromkeys(self.alphabet, value)
+            b = float(value)
+            self._pseudocounts = {letter: b for letter in self.alphabet}
 
     # background property
     @property
@@ -334,20 +351,11 @@ class Motif:
         """Calculate and return the position specific scoring matrix for this motif."""
         return self.pwm.log_odds(self._background)
 
-    def __str__(self, masked=False):
+    def __str__(self):
         """Return string representation of a motif."""
-        text = ""
-        if self.alignment is not None:
-            text += "\n".join(self.alignment)
-
-        if masked:
-            for i in range(self.length):
-                if self.__mask[i]:
-                    text += "*"
-                else:
-                    text += " "
-            text += "\n"
-        return text
+        name = self.name if self.name is not None else ""
+        length = self.length if self.length is not None else 0
+        return f"Motif(name={name}, length={length}, alphabet={self.alphabet})"
 
     def __len__(self):
         """Return the length of a motif.
@@ -386,7 +394,7 @@ class Motif:
                 T_or_U: self.counts["A"][::-1],
             }
             res = Motif(alphabet=alphabet, counts=counts)
-        res.__mask = self.__mask[::-1]
+        res.mask = self.mask[::-1]
         res.background = {
             "A": self.background[T_or_U],
             "C": self.background["G"],
@@ -476,7 +484,7 @@ class Motif:
 
         # Helper to format one row of floats like "  1.00   0.00 ..."
         def _fmt_row(vals):
-            return " ".join("%6.2f" % float(v) for v in vals)
+            return " ".join(f"{float(v):6.2f}" for v in vals)
 
         if f == "pfm":
             # Four lines (in self.alphabet order), no row labels, trailing newline.
@@ -487,8 +495,11 @@ class Motif:
             return "\n".join(lines) + "\n"
 
         if f == "jaspar":
-            # Header: ><id> <name>  (id is None in your tests)
-            header = f">{self.__dict__.get('accession', None)} {self.name}".rstrip()
+            # Header
+            acc = self.accession if hasattr(self, "accession") else None
+            name = self.name if self.name is not None else ""
+            header = f">{acc} {name}".rstrip()
+
             lines = [header]
             for letter in self.alphabet:
                 row = [self.counts.get_value(letter, i) for i in range(self.length)]

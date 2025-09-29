@@ -19,13 +19,15 @@ from typing import Dict, List, Optional
 import math
 
 class GenericPositionMatrix:
-
+    alphabet: str
+    length: Optional[int]
+    _data: Dict[str, List[float]]
     """Base class for the support of position matrix operations."""
     def __init__(self, alphabet, values):
         """Initialize the class."""
-        self.alphabet: str = ''.join(alphabet)  # or keep input order if you wish
-        self.length: Optional[int] = None
-        self._data: Dict[str, List[float]] = {}
+        self.alphabet = ''.join(alphabet)  # or keep input order if you wish
+        self.length = None
+        self._data = {}
         for ch in self.alphabet:
             if self.length is None:
                 self.length = len(values[ch])
@@ -75,7 +77,7 @@ class GenericPositionMatrix:
                     ch: self._data[ch][cols.start or 0 : cols.stop or self.length]
                     for ch in row_keys
                 }
-                return self.__class__(''.join(row_keys), new_counts)
+                return GenericPositionMatrix(''.join(row_keys), new_counts)
 
             raise KeyError(f"Unsupported column selector {cols!r}")
 
@@ -466,11 +468,11 @@ class PositionWeightMatrix(GenericPositionMatrix):
         GenericPositionMatrix.__init__(self, alphabet, counts)
         # normalize to probabilities column-wise
         for i in range(self.length):
-            total: float = 0.0
+            total = 0.0
             for letter in alphabet:
                 total += float(self.get_value(letter, i))
             if total > 0.0:
-                inv: float = 1.0 / total
+                inv = 1.0 / total
                 for letter in alphabet:
                     self._data[letter][i] = float(self._data[letter][i]) * inv
 
@@ -511,20 +513,27 @@ class PositionWeightMatrix(GenericPositionMatrix):
         return PositionSpecificScoringMatrix(alphabet, values)
 
 
-class FrequencyPositionMatrix(GenericPositionMatrix):
-    """Class for the support of frequency calculations on the Position Matrix."""
-    def normalize(self, pseudocounts=None):
-        counts = {}
-        for ch in self.alphabet:
-            base = 0.0
-            if isinstance(pseudocounts, dict):
-                base = float(pseudocounts[ch])
-            elif pseudocounts is not None:
-                base = float(pseudocounts)
+# Build a frequency-position "matrix" as a GenericPositionMatrix
+def make_fpm(alphabet: str, values: Dict[str, List[float]]) -> GenericPositionMatrix:
+    # Ensure values are floats & rectangular using your base ctor’s logic
+    # (GenericPositionMatrix.__init__ already checks consistency and casts).
+    return GenericPositionMatrix(alphabet, values)
 
-            row = []
-            for v in self._data[ch]:
-                row.append(base + float(v))
-            counts[ch] = row
-        return PositionWeightMatrix(self.alphabet, counts)
+# Add pseudocounts and produce a PositionWeightMatrix
+def fpm_normalize(fpm: GenericPositionMatrix, pseudocounts=None) -> PositionWeightMatrix:
+    # Normalize pseudocounts to per-symbol base
+    if pseudocounts is None:
+        per = {ch: 0.0 for ch in fpm.alphabet}
+    elif isinstance(pseudocounts, dict):
+        per = {ch: float(pseudocounts.get(ch, 0.0)) for ch in fpm.alphabet}
+    else:
+        base = float(pseudocounts)
+        per = {ch: base for ch in fpm.alphabet}
 
+    counts = {}
+    for ch in fpm.alphabet:
+        row = fpm._data[ch]
+        counts[ch] = [float(v) + per[ch] for v in row]
+
+    # Your PWM.__init__ already does the column normalization step
+    return PositionWeightMatrix(fpm.alphabet, counts)

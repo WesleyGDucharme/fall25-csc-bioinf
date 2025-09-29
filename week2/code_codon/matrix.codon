@@ -93,12 +93,12 @@ class GenericPositionMatrix:
 
     def __str__(self):
         """Return a string containing nucleotides and counts of the alphabet in the Matrix."""
-        words = ["%6d" % i for i in range(self.length)]
+        words = [f"{i:6d}" for i in range(self.length)]
         line = "   " + " ".join(words)
         lines = [line]
         for letter in self.alphabet:
-            words = ["%6.2f" % self.get_value(letter, i) for i in range(self.length)]
-            line = "%c: " % letter + " ".join(words)
+            words = [f"{self.get_value(letter, i):6.2f}" for i in range(self.length)]
+            line = f"{letter}: " + " ".join(words)
             lines.append(line)
         text = "\n".join(lines) + "\n"
         return text
@@ -521,19 +521,24 @@ def make_fpm(alphabet: str, values: Dict[str, List[float]]) -> GenericPositionMa
 
 # Add pseudocounts and produce a PositionWeightMatrix
 def fpm_normalize(fpm: GenericPositionMatrix, pseudocounts=None) -> PositionWeightMatrix:
-    # Normalize pseudocounts to per-symbol base
+    # Build per-symbol pseudocounts dict without ever calling float() on a dict
     if pseudocounts is None:
         per = {ch: 0.0 for ch in fpm.alphabet}
-    elif isinstance(pseudocounts, dict):
-        per = {ch: float(pseudocounts.get(ch, 0.0)) for ch in fpm.alphabet}
-    else:
+    elif isinstance(pseudocounts, (int, float)):
         base = float(pseudocounts)
         per = {ch: base for ch in fpm.alphabet}
+    else:
+        # Treat as mapping (typed dicts in Codon may not pass isinstance(..., dict))
+        try:
+            per = {ch: float(pseudocounts[ch]) for ch in fpm.alphabet}
+        except Exception:
+            raise TypeError(
+                "pseudocounts must be None, a number, or a mapping {str: number}"
+            )
 
     counts = {}
     for ch in fpm.alphabet:
         row = fpm._data[ch]
         counts[ch] = [float(v) + per[ch] for v in row]
 
-    # Your PWM.__init__ already does the column normalization step
     return PositionWeightMatrix(fpm.alphabet, counts)

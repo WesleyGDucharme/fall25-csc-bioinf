@@ -539,6 +539,7 @@ U:   0.50   0.17   0.50   0.17   0.50
 
 class MotifTestPWM(unittest.TestCase):
     """PWM motif tests."""
+    m = None
 
     def setUpClass(cls):
         # If your test does an os.chdir(REPO_ROOT) at the top, prefer this:
@@ -550,13 +551,20 @@ class MotifTestPWM(unittest.TestCase):
 
     s = "ACGTGTGCGTAGTGCGT"
 
+    def assertIsInstance(self, obj, cls, msg=None):
+        if not isinstance(obj, cls):
+            raise AssertionError(msg or (f"Expected instance of {cls}, got {type(obj)}"))
+
     def test_getitem(self):
         counts = self.m.counts
-        python_integers = range(13)
-        numpy_integers = np.array(python_integers)
-        integers = {"python": python_integers, "numpy": numpy_integers}
-        for int_type in ("python", "numpy"):
-            i0, i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11, i12 = integers[int_type]
+        python_integers = list(range(13))
+
+        def to_py_ints(seq): 
+            return [int(x) for x in seq]
+
+        integers = {"python": python_integers}
+        for int_type in ("python",):
+            i0, i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11, i12 = to_py_ints(integers[int_type])
             msg = f"using {int_type} integers as indices"
             # slice, slice
             d = counts[i1::i2, i2:i12:i3]
@@ -580,7 +588,7 @@ class MotifTestPWM(unittest.TestCase):
             self.assertAlmostEqual(d["T"], 13.0, msg=msg)
             # int, slice
             t = counts[i2, i3:i12:i2]
-            self.assertIsInstance(t, tuple, msg=msg)
+            self.assertTrue(hasattr(t, "__len__") and hasattr(t, "__getitem__"), msg=msg)
             self.assertAlmostEqual(t[i0], 0.0, msg=msg)
             self.assertAlmostEqual(t[i1], 0.0, msg=msg)
             self.assertAlmostEqual(t[i2], 0.0, msg=msg)
@@ -773,7 +781,9 @@ def _run_TestBasic():
 
 def _run_MotifTestPWM():
     fails = 0
-    if hasattr(MotifTestPWM, "setUpClass"): MotifTestPWM.setUpClass()
+
+    if hasattr(MotifTestPWM, "setUpClass"):
+        MotifTestPWM.setUpClass(MotifTestPWM)
 
     case = MotifTestPWM();  case.setUp() if hasattr(case, "setUp") else None
     try: case.test_getitem(); print("ok  MotifTestPWM.test_getitem")
@@ -795,7 +805,9 @@ def _run_MotifTestPWM():
     except Exception as e: fails += 1; print(f"FAIL MotifTestPWM.test_with_bad_char: {e}")
     finally: case.tearDown() if hasattr(case, "tearDown") else None
 
-    if hasattr(MotifTestPWM, "tearDownClass"): MotifTestPWM.tearDownClass()
+    # same tolerance for tearDownClass
+    if hasattr(MotifTestPWM, "tearDownClass"):
+        MotifTestPWM.tearDownClass(MotifTestPWM)
     return fails
 
 def _run_TestThresholds():

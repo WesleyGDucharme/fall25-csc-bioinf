@@ -15,13 +15,47 @@
 Implementation of frequency (count) matrices, position-weight matrices,
 and position-specific scoring matrices.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import math
+
+class IndexableFloatList:
+    """Wrapper classs  """
+    data: List[float]
+
+    def __init__(self, seq):
+        # materialize as native floats
+        self.data = [float(x) for x in seq]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __getitem__(self, key):
+        # If it's a slice, return a plain Python list[float]
+        if isinstance(key, slice):
+            n = len(self.data)
+            start = 0 if key.start is None else int(key.start)
+            stop  = n if key.stop  is None else int(key.stop)
+            step  = 1 if key.step  is None else int(key.step)
+            if step == 0:
+                raise ValueError("slice step cannot be zero")
+            if start < 0: start += n
+            if stop  < 0: stop  += n
+            start = max(0, start); stop = min(n, stop)
+            return [self.data[i] for i in range(start, stop, step)]
+        # Otherwise coerce to native int and return a float
+        i = int(key)
+        if i < 0:
+            i += len(self.data)
+        return float(self.data[i])
 
 class GenericPositionMatrix:
     alphabet: str
     length: Optional[int]
     _data: Dict[str, List[float]]
+
     """Base class for the support of position matrix operations."""
     def __init__(self, alphabet, values):
         """Initialize the class."""
@@ -37,51 +71,189 @@ class GenericPositionMatrix:
             row = [float(v) for v in values[ch]]
             self._data[ch] = row
 
-    def __getitem__(self, key):
-        """
-        Support Biopython-style indexing:
-          m["A"]                  -> full list of values for row A
-          m["A", 3]               -> scalar at row A, column 3
-          m[:, 3]                 -> dict {letter: value_at_column_3} for all rows
-          m[:, 2:5]               -> sub-matrix (same type) with selected columns
-          m["ACG", :]             -> sub-matrix with only these rows
-          m[("A","C"), 0:4]       -> sub-matrix with selected rows and column slice
-        """
-        # 1D: m["A"]
-        if isinstance(key, str) and len(key) == 1:
-            return list(self._data[key])
+    # indexing helpers
+    def _row_labels_from_sel(self, sel) -> List[str]:
+        n = len(self.alphabet)
+        # slice of rows
+        if isinstance(sel, slice):
+            start = 0 if sel.start is None else int(sel.start)
+            stop  = n if sel.stop is None else int(sel.stop)
+            step  = 1 if sel.step is None else int(sel.step)
+            if step == 0:
+                raise ValueError("slice step cannot be zero")
+            if start < 0: start += n
+            if stop  < 0: stop  += n
+            start = max(0, start); stop = min(n, stop)
+            idx = list(range(start, stop, step))
+        # explicit index list/tuple
+        elif isinstance(sel, (list, tuple)):
+            idx = [int(i) for i in sel]
+        # single row by letter
+        elif isinstance(sel, str):
+            try:
+                return [self.alphabet[int(sel)]]
+            except Exception:
+                try:
+                    i = self.alphabet.index(sel)
+                    return [self.alphabet[i]]
+                except Exception:
+                    raise KeyError(f"unknown row selector {sel!r}")
+        # single row by int-like
+        else:
+            i = int(sel)
+            if i < 0: i += n
+            if not (0 <= i < n):
+                raise IndexError("row index out of range")
+            idx = [i]
+        # clamp valid indices and map to letters
+        return [self.alphabet[i] for i in idx if 0 <= i < n]
 
-        # 2D form
-        if isinstance(key, tuple) and len(key) == 2:
-            rows, cols = key
+    def _col_list_from_sel(self, sel) -> List[int]:
+        m = self.length
+        # slice of columns
+        if isinstance(sel, slice):
+            start = 0 if sel.start is None else int(sel.start)
+            stop  = m if sel.stop is None else int(sel.stop)
+            step  = 1 if sel.step is None else int(sel.step)
+            if step == 0:
+                raise ValueError("slice step cannot be zero")
+            if start < 0: start += m
+            if stop  < 0: stop  += m
+            start = max(0, start); stop = min(m, stop)
+            return [j for j in range(start, stop, step)]
+        # explicit index list/tuple
+        if isinstance(sel, (list, tuple)):
+            return [int(j) for j in sel]
+        # single int-like → return one-element list
+        j = int(sel)
+        if j < 0: j += m
+        if not (0 <= j < m):
+            raise IndexError("column index out of range")
+        return [j]
 
-            # normalize rows selector
-            if isinstance(rows, slice) and rows == slice(None, None, None):
-                row_keys = list(self.alphabet)
-            elif isinstance(rows, str):
-                row_keys = [rows]
-            elif isinstance(rows, (list, tuple)):
-                row_keys = list(rows)
-            else:
-                raise KeyError(f"Unsupported row selector {rows!r}")
+    def _take_row_list(self, row: List[float], cols: List[int]) -> List[float]:
+        out: List[float] = []
+        L = self.length
+        for jj in cols:
+            j = int(jj)
+            if 0 <= j < L:
+                out.append(float(row[j]))
+        return out
 
-            # single-column access: return dict or scalar
-            if isinstance(cols, int):
-                if len(row_keys) == 1:
-                    return self._data[row_keys[0]][cols]
-                return {ch: self._data[ch][cols] for ch in row_keys}
+    # __getitem__ overloads
+    # (slice, slice)
+    def __getitem__(self, key: Tuple[slice, slice]):
+        rsel, csel = key
+        rows = self._row_labels_from_sel(rsel)
+        cols = self._col_list_from_sel(csel)
+        out = {}  # Dict[str, IndexableFloatList]
+        for ch in rows:
+            vals = self._take_row_list(self._data[ch], cols)  # List[float]
+            out[ch] = IndexableFloatList(vals)
+        return out
 
-            # column slice → return a sub-matrix
-            if isinstance(cols, slice):
-                new_counts = {
-                    ch: self._data[ch][cols.start or 0 : cols.stop or self.length]
-                    for ch in row_keys
-                }
-                return GenericPositionMatrix(''.join(row_keys), new_counts)
+    # (slice, int) -> Dict[str, float]
+    def __getitem__(self, key: Tuple[slice, int]):
+        rsel, c = key
+        rows = self._row_labels_from_sel(rsel)
+        j_list = self._col_list_from_sel(c)  # single int -> [j]
+        j = j_list[0]
+        out: Dict[str, float] = {}
+        for ch in rows:
+            out[ch] = IndexableFloatList(self._data[ch][j])
+        return out
 
-            raise KeyError(f"Unsupported column selector {cols!r}")
+    # ((tuple-of-rows), slice)
+    def __getitem__(self, key: Tuple[tuple, slice]):
+        rsel, csel = key
+        rows = self._row_labels_from_sel(rsel)
+        cols = self._col_list_from_sel(csel)
+        out = {}
+        for ch in rows:
+            vals = self._take_row_list(self._data[ch], cols)
+            out[ch] = IndexableFloatList(vals)
+        return out
 
-        raise KeyError(f"Cannot understand key {key!r}")
+    # ((tuple-of-rows), int) -> Dict[str, float]
+    def __getitem__(self, key: Tuple[tuple, int]):
+        rsel, c = key
+        rows = self._row_labels_from_sel(rsel)
+        j = self._col_list_from_sel(c)[0]
+        out: Dict[str, float] = {}
+        for ch in rows:
+            out[ch] = IndexableFloatList(self._data[ch][j])
+        return out
+
+    # ((list-of-rows), slice)
+    def __getitem__(self, key: Tuple[list, slice]):
+        rsel, csel = key
+        rows = self._row_labels_from_sel(rsel)
+        cols = self._col_list_from_sel(csel)
+        out = {}
+        for ch in rows:
+            vals = self._take_row_list(self._data[ch], cols)
+            out[ch] = IndexableFloatList(vals)
+        return out
+
+    # ((list-of-rows), int) -> Dict[str, float]
+    def __getitem__(self, key: Tuple[list, int]):
+        rsel, c = key
+        rows = self._row_labels_from_sel(rsel)
+        j = self._col_list_from_sel(c)[0]
+        out: Dict[str, float] = {}
+        for ch in rows:
+            out[ch] = float(self._data[ch][j])
+        return out
+
+    # single-arg slice: columns across all rows
+    def __getitem__(self, key: slice):
+        cols = self._col_list_from_sel(key)
+        out = {}
+        for ch in self.alphabet:
+            vals = self._take_row_list(self._data[ch], cols)
+            out[ch] = IndexableFloatList(vals)
+        return out
+
+    # (str, slice) -> Tuple[float, ...]
+    def __getitem__(self, key: Tuple[str, slice]):
+        ch, csel = key
+        cols = self._col_list_from_sel(csel)
+        vals = self._take_row_list(self._data[ch], cols)
+        return IndexableFloatList(vals)
+
+    # (str, int) -> float
+    def __getitem__(self, key: Tuple[str, int]):
+        ch, c = key
+        j = self._col_list_from_sel(c)[0]
+        return IndexableFloatList(self._data[ch][j])
+
+    # (int, slice) -> Tuple[float, ...]
+    def __getitem__(self, key: Tuple[int, slice]):
+        i, csel = key
+        rows = self._row_labels_from_sel(i)  # one row label
+        ch = rows[0]
+        cols = self._col_list_from_sel(csel)
+        vals = self._take_row_list(self._data[ch], cols)
+        return IndexableFloatList(vals)
+
+    # (int, int) -> float
+    def __getitem__(self, key: Tuple[int, int]):
+        i, c = key
+        ch = self._row_labels_from_sel(i)[0]
+        j = self._col_list_from_sel(c)[0]
+        return IndexableFloatList(self._data[ch][j])
+
+    # single selectors
+
+    # str -> List[float]  (entire row)
+    def __getitem__(self, key: str):
+        return self._data[key]
+
+    # int -> List[float]  (entire row)
+    def __getitem__(self, key: int):
+        ch = self._row_labels_from_sel(key)[0]
+        return self._data[ch]
+
 
     def get_value(self, letter, i):
         """Return the scalar at row `letter` and column index `i` as float."""
@@ -235,7 +407,7 @@ class GenericPositionMatrix:
 
     def reverse_complement(self):
         """Compute reverse complement."""
-        valuesi: dict[str, list[float]] = {}
+        values: dict[str, list[float]] = {}
         if self.alphabet == "ACGU":
             values["A"] = list(reversed(self.get_row("U")))
             values["U"] = list(reversed(self.get_row("A")))

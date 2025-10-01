@@ -18,38 +18,6 @@ and position-specific scoring matrices.
 from typing import Dict, List, Optional, Tuple
 import math
 
-class IndexableFloatList:
-    """Wrapper classs  """
-    data: List[float]
-
-    def __init__(self, seq):
-        # materialize as native floats
-        self.data = [float(x) for x in seq]
-
-    def __len__(self):
-        return len(self.data)
-
-    def __iter__(self):
-        return iter(self.data)
-
-    def __getitem__(self, key):
-        # If it's a slice, return a plain Python list[float]
-        if isinstance(key, slice):
-            n = len(self.data)
-            start = 0 if key.start is None else int(key.start)
-            stop  = n if key.stop  is None else int(key.stop)
-            step  = 1 if key.step  is None else int(key.step)
-            if step == 0:
-                raise ValueError("slice step cannot be zero")
-            if start < 0: start += n
-            if stop  < 0: stop  += n
-            start = max(0, start); stop = min(n, stop)
-            return [self.data[i] for i in range(start, stop, step)]
-        # Otherwise coerce to native int and return a float
-        i = int(key)
-        if i < 0:
-            i += len(self.data)
-        return float(self.data[i])
 
 class GenericPositionMatrix:
     alphabet: str
@@ -140,124 +108,104 @@ class GenericPositionMatrix:
                 out.append(float(row[j]))
         return out
 
-    # __getitem__ overloads
-    # (slice, slice)
-    def __getitem__(self, key: Tuple[slice, slice]):
-        rsel, csel = key
-        rows = self._row_labels_from_sel(rsel)
-        cols = self._col_list_from_sel(csel)
-        out = {}  # Dict[str, IndexableFloatList]
-        for ch in rows:
-            vals = self._take_row_list(self._data[ch], cols)  # List[float]
-            out[ch] = IndexableFloatList(vals)
-        return out
+    def _is_slice(self, obj):
+        """Duck-type check that works with Codon's Slice[int,int,int]."""
+        try:
+            name = type(obj).__name__
+            # Codon: 'Slice[...]', Python: 'slice'
+            return name == "slice" or "Slice" in name
+        except:
+            return False
 
-    # (slice, int) -> Dict[str, float]
-    def __getitem__(self, key: Tuple[slice, int]):
-        rsel, c = key
-        rows = self._row_labels_from_sel(rsel)
-        j_list = self._col_list_from_sel(c)  # single int -> [j]
-        j = j_list[0]
-        out: Dict[str, float] = {}
-        for ch in rows:
-            out[ch] = IndexableFloatList(self._data[ch][j])
-        return out
+    def __getitem__(self, key):
+        """
+        Support Biopython-style indexing:
+          m["A"]                  -> full list of values for row A
+          m["A", 3]               -> scalar at row A, column 3
+          m[:, 3]                 -> dict {letter: value_at_column_3} for all rows
+          m[:, 2:5]               -> sub-matrix (same type) with selected columns
+          m["ACG", :]             -> sub-matrix with only these rows
+          m[("A","C"), 0:4]       -> sub-matrix with selected rows and column slice
+        """
+        # 1D: m["A"]
+        if isinstance(key, str) and len(key) == 1:
+            return list(self._data[key])
 
-    # ((tuple-of-rows), slice)
-    def __getitem__(self, key: Tuple[tuple, slice]):
-        rsel, csel = key
-        rows = self._row_labels_from_sel(rsel)
-        cols = self._col_list_from_sel(csel)
-        out = {}
-        for ch in rows:
-            vals = self._take_row_list(self._data[ch], cols)
-            out[ch] = IndexableFloatList(vals)
-        return out
+        # 2D form
+        if isinstance(key, tuple) and len(key) == 2:
+            rows, cols = key
 
-    # ((tuple-of-rows), int) -> Dict[str, float]
-    def __getitem__(self, key: Tuple[tuple, int]):
-        rsel, c = key
-        rows = self._row_labels_from_sel(rsel)
-        j = self._col_list_from_sel(c)[0]
-        out: Dict[str, float] = {}
-        for ch in rows:
-            out[ch] = IndexableFloatList(self._data[ch][j])
-        return out
+            # normalize rows selector
 
-    # ((list-of-rows), slice)
-    def __getitem__(self, key: Tuple[list, slice]):
-        rsel, csel = key
-        rows = self._row_labels_from_sel(rsel)
-        cols = self._col_list_from_sel(csel)
-        out = {}
-        for ch in rows:
-            vals = self._take_row_list(self._data[ch], cols)
-            out[ch] = IndexableFloatList(vals)
-        return out
+            row_is_slice = (type(rows).__name__ == "slice") or ("Slice" in type(rows).__name__)
 
-    # ((list-of-rows), int) -> Dict[str, float]
-    def __getitem__(self, key: Tuple[list, int]):
-        rsel, c = key
-        rows = self._row_labels_from_sel(rsel)
-        j = self._col_list_from_sel(c)[0]
-        out: Dict[str, float] = {}
-        for ch in rows:
-            out[ch] = float(self._data[ch][j])
-        return out
+            if row_is_slice:
+                # counts[:, j] or counts[:, j0:j1] → operate on *all* rows
+                row_keys = list(self.alphabet)
+            elif isinstance(rows, str) and len(rows) == 1:
+                row_keys = [rows]
+            elif isinstance(rows, (list, tuple)):
+                row_keys = list(rows)
+            else:
+                # optional: support compact "ACG" string as a list of letters
+                if isinstance(rows, str):
+                    row_keys = list(rows)
+                else:
+                    raise KeyError(f"Unsupported row selector {rows!r}")
 
-    # single-arg slice: columns across all rows
-    def __getitem__(self, key: slice):
-        cols = self._col_list_from_sel(key)
-        out = {}
-        for ch in self.alphabet:
-            vals = self._take_row_list(self._data[ch], cols)
-            out[ch] = IndexableFloatList(vals)
-        return out
+            # single-column access: decide purely by the TYPE of 'rows'
 
-    # (str, slice) -> Tuple[float, ...]
-    def __getitem__(self, key: Tuple[str, slice]):
-        ch, csel = key
-        cols = self._col_list_from_sel(csel)
-        vals = self._take_row_list(self._data[ch], cols)
-        return IndexableFloatList(vals)
+            # single-column access: decide by the TYPE of 'rows'
+            if isinstance(cols, int):
+                # (str, int) -> float (single row, single col)
+                if isinstance(rows, str):
+                    if len(rows) != 1:
+                        # multi-letter strings ("ACGT") aren’t allowed for (str, int)
+                        # use a list/tuple for multi-row single-column access
+                        raise TypeError("Use list/tuple of letters for multi-row single-column access")
+                    return float(self._data[rows][cols])
 
-    # (str, int) -> float
-    def __getitem__(self, key: Tuple[str, int]):
-        ch, c = key
-        j = self._col_list_from_sel(c)[0]
-        return IndexableFloatList(self._data[ch][j])
+                # (slice, int) -> Dict[str, float]  (e.g. [:, j])
+                row_is_slice = (type(rows).__name__ == "slice") or ("Slice" in type(rows).__name__)
+                if row_is_slice:
+                    return {ch: float(self._data[ch][cols]) for ch in self.alphabet}
 
-    # (int, slice) -> Tuple[float, ...]
-    def __getitem__(self, key: Tuple[int, slice]):
-        i, csel = key
-        rows = self._row_labels_from_sel(i)  # one row label
-        ch = rows[0]
-        cols = self._col_list_from_sel(csel)
-        vals = self._take_row_list(self._data[ch], cols)
-        return IndexableFloatList(vals)
+                # (list|tuple, int) -> Dict[str, float]
+                if isinstance(rows, (list, tuple)):
+                    # normalize possible int indices to letters
+                    norm = []
+                    for r in rows:
+                        if isinstance(r, str):
+                            norm.append(r)
+                        else:
+                            idx = int(r)
+                            if idx < 0:
+                                idx += len(self.alphabet)
+                            norm.append(self.alphabet[idx])
+                    return {ch: float(self._data[ch][cols]) for ch in norm}
 
-    # (int, int) -> float
-    def __getitem__(self, key: Tuple[int, int]):
-        i, c = key
-        ch = self._row_labels_from_sel(i)[0]
-        j = self._col_list_from_sel(c)[0]
-        return IndexableFloatList(self._data[ch][j])
+                raise KeyError(f"Unsupported row selector {rows!r} for single-column access")
 
-    # single selectors
+            # column slice  return a sub-matrix
+            if isinstance(cols, slice):
+                new_counts = {
+                    ch: self._data[ch][cols.start or 0 : cols.stop or self.length]
+                    for ch in row_keys
+                }
+                return GenericPositionMatrix(''.join(row_keys), new_counts)
 
-    # str -> List[float]  (entire row)
-    def __getitem__(self, key: str):
-        return self._data[key]
+            raise KeyError(f"Unsupported column selector {cols!r}")
 
-    # int -> List[float]  (entire row)
-    def __getitem__(self, key: int):
-        ch = self._row_labels_from_sel(key)[0]
-        return self._data[ch]
-
+        raise KeyError(f"Cannot understand key {key!r}")
 
     def get_value(self, letter, i):
         """Return the scalar at row `letter` and column index `i` as float."""
         return float(self._data[letter][i])
+
+    def normalize(self, pseudocounts=None):
+        # compatibility shim for Biopython-style API
+        # returns a PositionWeightMatrix
+        return fpm_normalize(self, pseudocounts)
 
     def get_row(self, letter):
         """Return a copy of the row for `letter` as a list of floats."""
@@ -421,6 +369,10 @@ class GenericPositionMatrix:
 
 class PositionSpecificScoringMatrix(GenericPositionMatrix):
     """Class for the support of Position Specific Scoring Matrix calculations."""
+
+    def __init__(self, alphabet, values):
+        # values: Dict[str, List[float]] of log-odds
+        super().__init__(alphabet, values)
 
     def calculate(self, sequence):
         """Return the PWM score for a given sequence for all positions."""

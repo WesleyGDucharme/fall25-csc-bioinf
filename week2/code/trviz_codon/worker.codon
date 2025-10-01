@@ -1,0 +1,337 @@
+import sys
+from .utils import (
+  get_sample_and_sequence_from_fasta,
+  is_valid_sequence,
+  get_levenshtein_distance,
+  add_padding,
+  _distance_matrix,
+  is_emitting_state,
+  get_repeating_pattern_lengths,
+  get_motifs_from_visited_states_and_region,
+  get_motif_counter_from_csv_rows,
+  sort_pairs,
+  _score_matrix,
+  _parse_sym_motif_pairs,
+  _cost_pair,
+  _total_cost,
+  _sort_by_manually,
+  _motif_marks,
+  _sample_to_population,
+)
+
+
+# Protocol:
+# Client -> "CMD N" (one line), then N lines (each an arg)
+# Server -> "OK", then a line with <L>, then L payload lines
+#        or "ERR: <message>"
+
+def println(s):
+    print(s)
+    sys.stdout.flush()
+
+def read_line():
+    # Returns a string without trailing newline; returns None on EOF
+    try:
+        return input()
+    except:
+        return ""
+
+def handle(cmd, args):
+    # Write response directly (OK + count + payload), or print ERR and return
+
+    if cmd == "utils.get_fasta":
+        if len(args) != 1:
+            println("ERR: need 1 arg (path)")
+            return
+        path = args[0]
+        headers, seqs = get_sample_and_sequence_from_fasta(path)
+        println("OK")
+        println(str(len(headers)))
+        i = 0
+        while i < len(headers):
+            println(headers[i] + "\t" + seqs[i])
+            i += 1
+        return
+
+    if cmd == "utils.is_valid_seq":
+        if len(args) != 1:
+            println("ERR: need 1 arg (sequence)")
+            return
+        println("OK")
+        println("1")
+        println("1" if is_valid_sequence(args[0].upper()) else "0")
+        return
+
+    if cmd == "utils.levenshtein":
+        if len(args) != 2:
+            println("ERR: need 2 args (s1 s2)")
+            return
+        println("OK")
+        println("1")
+        println(str(get_levenshtein_distance(args[0], args[1])))
+        return
+
+    if cmd == "utils.add_padding":
+        if len(args) < 1:
+            println("ERR: need >=1 encoded string")
+            return
+        res = add_padding(args)
+        println("OK")
+        println(str(len(res)))
+        for r in res:
+            println(r)
+        return
+
+    if cmd == "utils.distance_matrix":
+        if len(args) < 1:
+            println("ERR: need >=1 pair 'sym:motif'")
+            return
+        lines = _distance_matrix(args)
+        println("OK")
+        println(str(len(lines)))
+        for ln in lines:
+            println(ln)
+        return
+
+    if cmd == "utils.repeat_lengths":
+        # args: visited states, one per line
+        lens = get_repeating_pattern_lengths(args)
+        println("OK")
+        println(str(len(lens)))
+        i = 0
+        while i < len(lens):
+            println(str(lens[i]))
+            i += 1
+        return
+
+    if cmd == "utils.motifs_from_states":
+        # args: first is region string, rest are visited states
+        if len(args) < 1:
+            println("ERR: need region + states")
+            return
+        region = args[0]
+        states = []
+        i = 1
+        while i < len(args):
+            states.append(args[i])
+            i += 1
+        segs = get_motifs_from_visited_states_and_region(states, region)
+        println("OK")
+        println(str(len(segs)))
+        for s in segs:
+            println(s)
+        return
+
+    if cmd == "utils.motif_counter":
+        # args: each is a comma-separated motif list for one sample
+        lines = get_motif_counter_from_csv_rows(args)
+        println("OK")
+        println(str(len(lines)))
+        for ln in lines:
+            println(ln)
+        return
+
+    if cmd == "utils.sort":
+        # args: method, then pairs "sample_id<TAB>aligned_vntr"
+        if len(args) < 1:
+            println("ERR: need method and pairs")
+            return
+        method = args[0]
+        rest = []
+        i = 1
+        while i < len(args):
+            rest.append(args[i])
+            i += 1
+        out = sort_pairs(method, rest)
+        println("OK")
+        println(str(len(out)))
+        for ln in out:
+            println(ln)
+        return
+
+    if cmd == "utils.score_matrix":
+        # args layout:
+        #   args[0] = match_score (int)
+        #   args[1] = mismatch1 (int)
+        #   args[2] = mismatch_gt1 (int)
+        #   args[3] = gap_open_penalty (float)
+        #   args[4] = gap_ext_penalty (float)
+        #   args[5..] = "sym:motif" pairs
+        if len(args) < 6:
+            println("ERR: need 5 params + >=1 pair")
+            return
+        try:
+            ms = int(args[0])
+            mm1 = int(args[1])
+            mmgt1 = int(args[2])
+            go = float(args[3])
+            ge = float(args[4])
+        except:
+            println("ERR: bad numeric parameters")
+            return
+        pairs = []
+        i = 5
+        while i < len(args):
+            pairs.append(args[i])
+            i += 1
+        lines = _score_matrix(pairs, ms, mm1, mmgt1, go, ge)
+        println("OK")
+        println(str(len(lines)))
+        for ln in lines:
+            println(ln)
+        return
+
+    # ---- costs over motifs (no precomputed matrix; we recompute via motif sequences) ----
+    if cmd == "utils.cost_pair":
+        # args: allow_copy_change (0/1), then K "sym:motif", a separator "--", then 2 aligned strings
+        if len(args) < 4:
+            println("ERR: need flag, >=1 pair, --, aligned1, aligned2")
+            return
+        allow = (args[0] == "1")
+        # find separator
+        sep_i = 1
+        while sep_i < len(args) and args[sep_i] != "--":
+            sep_i += 1
+        if sep_i >= len(args) - 2:
+            println("ERR: malformed args for cost_pair")
+            return
+        pairs = []
+        i = 1
+        while i < sep_i:
+            pairs.append(args[i])
+            i += 1
+        al1 = args[sep_i+1]
+        al2 = args[sep_i+2]
+        syms, motifs = _parse_sym_motif_pairs(pairs)
+        val = _cost_pair(al1, al2, syms, motifs, allow)
+        println("OK"); println("1"); println(str(val)); return
+
+    if cmd == "utils.total_cost":
+        # args: allow_copy_change (0/1), then K "sym:motif", a separator "--", then N aligned strings
+        if len(args) < 4:
+            println("ERR: need flag, >=1 pair, --, >=1 aligned string")
+            return
+        allow = (args[0] == "1")
+        sep_i = 1
+        while sep_i < len(args) and args[sep_i] != "--":
+            sep_i += 1
+        if sep_i >= len(args) - 1:
+            println("ERR: malformed args for total_cost")
+            return
+        pairs = []
+        i = 1
+        while i < sep_i:
+            pairs.append(args[i]); i += 1
+        # aligned strings after "--"
+        aligned = []
+        i = sep_i + 1
+        while i < len(args):
+            aligned.append(args[i]); i += 1
+        syms, motifs = _parse_sym_motif_pairs(pairs)
+        val = _total_cost(aligned, syms, motifs, allow)
+        println("OK"); println("1"); println(str(val)); return
+
+    # ---- sort by manually ----
+    if cmd == "utils.sort_manual":
+        # args: order file path, then pairs "id\tseq"
+        if len(args) < 1:
+            println("ERR: need order path and >=1 pair"); return
+        path = args[0]
+        try:
+            f = open(path, "r")
+            order_lines = f.readlines()
+            f.close()
+        except:
+            println("ERR: cannot open order file"); return
+        pairs = []
+        i = 1
+        while i < len(args):
+            pairs.append(args[i]); i += 1
+        out = _sort_by_manually(pairs, order_lines)
+        println("OK"); println(str(len(out)))
+        for ln in out: println(ln)
+        return
+
+    # ---- motif marks ----
+    if cmd == "utils.motif_marks":
+        # args: region file path, then rows "id\tmotif1,motif2,..."
+        if len(args) < 1:
+            println("ERR: need region file path"); return
+        path = args[0]
+        try:
+            f = open(path, "r")
+            reg_rows = f.readlines()
+            f.close()
+        except:
+            println("ERR: cannot open region prediction file"); return
+        rows = []
+        i = 1
+        while i < len(args):
+            rows.append(args[i]); i += 1
+        out = _motif_marks(rows, reg_rows)
+        println("OK"); println(str(len(out)))
+        for ln in out: println(ln)
+        return
+
+    # ---- sample -> population ----
+    if cmd == "utils.sample_to_population":
+        # args: file path, sep (single char), sample_idx (int), pop_idx (int)
+        if len(args) < 4:
+            println("ERR: need: file sep sample_idx pop_idx"); return
+        path = args[0]
+        sep = args[1][0] if len(args[1]) > 0 else "\t"
+        try:
+            sidx = int(args[2])
+            pidx = int(args[3])
+        except:
+            println("ERR: bad indexes"); return
+        try:
+            f = open(path, "r")
+            lines = f.readlines()
+            f.close()
+        except:
+            println("ERR: cannot open population file"); return
+        out = _sample_to_population(lines, sep, sidx, pidx)
+        println("OK"); println(str(len(out)))
+        for ln in out: println(ln)
+        return
+
+def main():
+    while True:
+        head = read_line()
+        if head is None:  # EOF
+            break
+        if not head:
+            # ignore blank keepalives
+            continue
+
+        parts = head.split()
+        if len(parts) != 2:
+            println("ERR: malformed header")
+            continue
+        cmd = parts[0]
+        try:
+            n = int(parts[1])
+        except:
+            println("ERR: bad arg count")
+            continue
+
+        args = []
+        i = 0
+        while i < n:
+            arg = read_line()
+            if arg is None:
+                println("ERR: premature EOF")
+                return
+            args.append(arg)
+            i += 1
+
+        try:
+            handle(cmd, args)
+        except Exception as e:
+            println("ERR: exception: " + str(e))
+
+
+
+if __name__ == "__main__":
+    main()

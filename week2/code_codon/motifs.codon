@@ -321,41 +321,76 @@ class Motif:
     def __getitem__(self, key):
         """Return a new Motif object for the positions included in key.
 
-        >>> from Bio import motifs
-        >>> motif = motifs.create(["AACGCCA", "ACCGCCC", "AACTCCG"])
-        >>> print(motif)
-        AACGCCA
-        ACCGCCC
-        AACTCCG
-        >>> print(motif[:-1])
-        AACGCC
-        ACCGCC
-        AACTCC
+        Supports slicing either an alignment-backed motif (list[str]) or a counts-backed motif.
+        For alignment-backed motifs, we slice each instance string, convert to counts, and
+        construct the result motif from counts (alignment-based constructor is not supported).
         """
         if not isinstance(key, slice):
             raise TypeError("motif indices must be slices")
+
         alphabet = self.alphabet
-        if self.alignment is None:
-            alignment = None
-            if self.counts is None:
-                counts = None
-            else:
-                counts = {letter: self.counts[letter][key] for letter in alphabet}
+
+        if self.alignment is not None:
+            # alignment-backed: slice strings then convert to counts
+            sliced = [s[key] for s in self.alignment]
+            new_len = len(sliced[0]) if sliced else 0
+            # build zeroed counts
+            counts = {ch: [0.0] * new_len for ch in alphabet}
+            # tally per column
+            for s in sliced:
+                if len(s) != new_len:
+                    raise ValueError("inconsistent instance lengths after slicing")
+                for i, ch in enumerate(s):
+                    if ch in counts:
+                        counts[ch][i] += 1.0
+                    # else: ignore unknown letters (e.g., N), like Biopython does
         else:
-            alignment = self.alignment[:, key]
-            counts = None
-        motif = Motif(alphabet=alphabet, alignment=alignment, counts=counts)
-        motif.mask = self.mask[key]
-        if alignment is None and counts is None:
-            try:
-                length = self.length
-            except AttributeError:
-                pass
+            # counts-backed: slice each row with normalized indices
+            def _indices_from_slice(s, maxlen):
+                start = 0 if s.start is None else int(s.start)
+                stop  = maxlen if s.stop is None else int(s.stop)
+                step  = 1 if s.step is None else int(s.step)
+                if step == 0:
+                    raise ValueError("slice step cannot be zero")
+                if start < 0:
+                    start += maxlen
+                if stop < 0:
+                    stop += maxlen
+                start = max(0, start)
+                stop = min(maxlen, stop)
+                return list(range(start, stop, step))
+
+            idx = _indices_from_slice(key, self.length)
+            counts = {}
+            for ch in alphabet:
+                row = self.counts.get_row(ch)
+                counts[ch] = [row[j] for j in idx if 0 <= j < self.length]
+
+        # always construct from counts (alignment-based init isnt supported)
+        motif = Motif(alphabet=alphabet, counts=counts)
+
+        # mask slice (robust to None / length mismatches)
+        try:
+            if self.mask is None:
+                motif.mask = [False] * motif.length
             else:
-                motif.length = len(range(*key.indices(length)))
-        motif.pseudocounts = self.pseudocounts.copy()
-        motif.background = self.background.copy()
+                mm = list(self.mask)
+                motif.mask = mm[key]
+                # Codon may give a view; ensure list
+                if not isinstance(motif.mask, list):
+                    motif.mask = list(motif.mask)
+                if len(motif.mask) != motif.length:
+                    motif.mask = [False] * motif.length
+        except Exception:
+            motif.mask = [False] * motif.length
+
+        # carry over params
+        motif.pseudocounts = self.pseudocounts
+        motif.background = self.background
+        motif.name = self.name
+
         return motif
+
 
     @property
     def pwm(self):

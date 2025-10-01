@@ -1,0 +1,4 @@
+>sample1
+match,0,3	intron,3,6
+>sample2
+intron,0,2	match,2,5

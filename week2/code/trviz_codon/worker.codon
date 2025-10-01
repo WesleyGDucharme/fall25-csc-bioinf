@@ -1,4 +1,5 @@
 import sys
+
 from .utils import (
   get_sample_and_sequence_from_fasta,
   is_valid_sequence,
@@ -19,6 +20,17 @@ from .utils import (
   _sample_to_population,
 )
 
+from .motif_encoder import (
+  encoder_find_threshold,
+  encoder_encode,
+)
+
+from .motif_aligner import (
+  aligner_align,
+  aligner_collect,
+)
+
+from .decomposer import refine_pairs
 
 # Protocol:
 # Client -> "CMD N" (one line), then N lines (each an arg)
@@ -294,6 +306,112 @@ def handle(cmd, args):
         out = _sample_to_population(lines, sep, sidx, pidx)
         println("OK"); println(str(len(out)))
         for ln in out: println(ln)
+        return
+
+    # ----- motif encoder: find threshold -----
+    if cmd == "encoder.find_threshold":
+        if len(args) < 1:
+            println("ERR: need label_count and rows")
+            return
+        try:
+            lc = int(args[0])
+        except:
+            println("ERR: bad label_count")
+            return
+        rows = []
+        i = 1
+        while i < len(args):
+            rows.append(args[i]); i += 1
+        try:
+            lines = encoder_find_threshold(lc, rows)
+        except Exception as e:
+            println("ERR: " + str(e)); return
+        println("OK"); println(str(len(lines)))
+        for ln in lines: println(ln)
+        return
+
+    # ----- motif encoder: encode -----
+    if cmd == "encoder.encode":
+        if len(args) < 2:
+            println("ERR: need label_count, auto_flag, rows")
+            return
+        try:
+            lc = int(args[0])
+            af = int(args[1])
+        except:
+            println("ERR: bad numeric parameters")
+            return
+        rows = []
+        i = 2
+        while i < len(args):
+            rows.append(args[i]); i += 1
+        try:
+            lines = encoder_encode(lc, af, rows)
+        except Exception as e:
+            println("ERR: " + str(e)); return
+        println("OK"); println(str(len(lines)))
+        for ln in lines: println(ln)
+        return
+
+    # ----- aligner: align (compose cmd & I/O paths) -----
+    if cmd == "aligner.align":
+        # args: method, preserve_order(0/1), tool_path, work_dir, then N pairs "id\tseq"
+        if len(args) < 4:
+            println("ERR: need method, preserve_order, tool_path, work_dir, and rows id<TAB>seq")
+            return
+        method = args[0]
+        try:
+            preserve = int(args[1])
+        except:
+            println("ERR: bad preserve_order"); return
+        tool_path = args[2]
+        work_dir = args[3]
+
+        ids = []
+        seqs = []
+        i = 4
+        while i < len(args):
+            if "\t" not in args[i]:
+                println("ERR: malformed row (need id<TAB>seq)"); return
+            sid, s = args[i].split("\t", 1)
+            ids.append(sid)
+            seqs.append(s)
+            i += 1
+        try:
+            lines = aligner_align(method, preserve, tool_path, work_dir, ids, seqs)
+        except Exception as e:
+            println("ERR: " + str(e)); return
+        println("OK"); println(str(len(lines)))
+        j = 0
+        while j < len(lines):
+            println(lines[j]); j += 1
+        return
+
+    # ----- aligner: collect aligned output -----
+    if cmd == "aligner.collect":
+        if len(args) != 1:
+            println("ERR: need OUT path"); return
+        try:
+            rows = aligner_collect(args[0])
+        except Exception as e:
+            println("ERR: " + str(e)); return
+        println("OK"); println(str(len(rows)))
+        k = 0
+        while k < len(rows):
+            println(rows[k]); k += 1
+        return
+
+    # ----- decomposer.refine -----
+    if cmd == "decomposer.refine":
+        # args: each arg is a row "motif1,motif2,..."
+        try:
+            out_rows = refine_pairs(args)
+        except Exception as e:
+            println("ERR: " + str(e)); return
+        println("OK"); println(str(len(out_rows)))
+        i = 0
+        while i < len(out_rows):
+            println(out_rows[i]); i += 1
         return
 
 def main():

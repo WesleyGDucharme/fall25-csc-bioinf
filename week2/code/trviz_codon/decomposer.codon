@@ -1,0 +1,148 @@
+# Port of Decomposer.refine() — pure string logic, no NumPy.
+
+# Given rows where each row is "motif1,motif2,...", return refined rows
+# using the same algorithm as Python:
+# - Count all adjacent motif pairs (as tuples) across TRs
+# - Also count by concatenated string to group ambiguous splits
+# - For each adjacent pair (a,b), if there exist multiple motif pairs
+#   whose concatenation equals a+b, replace (a,b) with the most frequent
+#   pair among that group.
+
+def _split_csv_row(s: str):
+    # split by ',' (no quoting in our data)
+    out = []
+    start = 0
+    i = 0
+    while i <= len(s):
+        if i == len(s) or s[i] == ',':
+            out.append(s[start:i])
+            start = i + 1
+        i += 1
+    return out
+
+def _join_csv_row(items: List[str]):
+    if len(items) == 0:
+        return ""
+    # join with ','
+    res = items[0]
+    i = 1
+    while i < len(items):
+        res += ","
+        res += items[i]
+        i += 1
+    return res
+
+def refine_pairs(rows):  # no type annotations to keep Codon happy
+    # --- parse rows into list[list[str]] ---
+    trs = []
+    r = 0
+    while r < len(rows):
+        row = rows[r].strip()
+        if len(row) == 0:
+            trs.append([])
+        else:
+            trs.append(_split_csv_row(row))
+        r += 1
+
+    # --- build counters (string keys, no .get) ---
+    # pair_count: "a\tb" -> int
+    pair_count = {}
+    # concat_count: "ab" -> int
+    concat_count = {}
+    # concat_to_pairs: "ab" -> List["a\tb"] (unique)
+    concat_to_pairs = {}
+
+    t = 0
+    while t < len(trs):
+        tr = trs[t]
+        i = 0
+        while i + 1 < len(tr):
+            a = tr[i]
+            b = tr[i + 1]
+            pkey = a + "\t" + b
+            ckey = a + b
+
+            # pair_count[pkey] += 1
+            if pkey in pair_count:
+                pair_count[pkey] = pair_count[pkey] + 1
+            else:
+                pair_count[pkey] = 1
+
+            # concat_count[ckey] += 1
+            if ckey in concat_count:
+                concat_count[ckey] = concat_count[ckey] + 1
+            else:
+                concat_count[ckey] = 1
+
+            # concat_to_pairs[ckey] contains unique pkeys
+            if ckey in concat_to_pairs:
+                plist = concat_to_pairs[ckey]
+            else:
+                plist = []
+                concat_to_pairs[ckey] = plist
+
+            # ensure uniqueness
+            seen = False
+            j = 0
+            while j < len(plist):
+                if plist[j] == pkey:
+                    seen = True
+                    break
+                j += 1
+            if not seen:
+                plist.append(pkey)
+
+            i += 1
+        t += 1
+
+    # --- refine each TR in place (single pass) ---
+    t = 0
+    while t < len(trs):
+        tr = trs[t]
+        i = 0
+        while i + 1 < len(tr):
+            a = tr[i]
+            b = tr[i + 1]
+            pkey = a + "\t" + b
+            ckey = a + b
+
+            cnt = pair_count[pkey] if (pkey in pair_count) else 0
+            if cnt == 0:
+                i += 1
+                continue
+
+            if (ckey in concat_count) and (cnt < concat_count[ckey]):
+                max_key = pkey
+                max_cnt = cnt
+
+                if ckey in concat_to_pairs:
+                    plist = concat_to_pairs[ckey]
+                    j = 0
+                    while j < len(plist):
+                        cand = plist[j]
+                        cval = pair_count[cand] if (cand in pair_count) else 0
+                        if cval > max_cnt:
+                            max_cnt = cval
+                            max_key = cand
+                        j += 1
+
+                # split "x\ty" into two motifs
+                kpos = 0
+                while kpos < len(max_key) and max_key[kpos] != '\t':
+                    kpos += 1
+                new_a = max_key[:kpos]
+                new_b = max_key[kpos + 1:]
+                tr[i] = new_a
+                tr[i + 1] = new_b
+
+            i += 1
+        t += 1
+
+    # --- emit CSV rows ---
+    out = []
+    t = 0
+    while t < len(trs):
+        out.append(_join_csv_row(trs[t]))
+        t += 1
+    return out
+

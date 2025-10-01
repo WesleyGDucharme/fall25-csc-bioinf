@@ -1,0 +1,558 @@
+# Utils.py codon port
+
+# constants 
+LOWERCASE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
+UPPERCASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+DIGITS = "0123456789"
+PRIVATE_MOTIF_LABEL = "?"
+# Use a list for membership checks (safe everywhere)
+SKIP_CHARS = ["(", "=", "<", ">", "?", "-"]
+DNA_CHARS = ["A", "C", "G", "T"]  # use 'in' checks against this list
+
+# Build INDEX_TO_CHR without numpy
+
+def _build_index_to_chr():
+    base = []
+    for ch in LOWERCASE_LETTERS:
+        base.append(ch)
+    for ch in UPPERCASE_LETTERS:
+        base.append(ch)
+    for ch in DIGITS:
+        base.append(ch)
+    for code in range(33, 127):
+        c = chr(code)
+        if (c not in SKIP_CHARS) and (c not in base):
+            base.append(c)
+    return base
+
+INDEX_TO_CHR = _build_index_to_chr()
+
+# --- FASTA parser (no BioPython) ---
+def get_sample_and_sequence_from_fasta(path):
+    """
+    Reads a FASTA file and returns (headers, sequences).
+    Header = text after '>' up to first whitespace.
+    Sequence = concatenated lines, uppercased.
+    """
+    headers = []
+    seqs = []
+
+    current_header = None
+    current_seq_parts = []
+
+    with open(path, "r") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            if s[0] == ">":
+                if current_header is not None:
+                    seqs.append("".join(current_seq_parts).upper())
+                    headers.append(current_header)
+                    current_seq_parts = []
+                h = s[1:]
+                parts = h.split()
+                current_header = parts[0] if len(parts) > 0 else ""
+            else:
+                current_seq_parts.append(s)
+
+    if current_header is not None:
+        seqs.append("".join(current_seq_parts).upper())
+        headers.append(current_header)
+
+    return headers, seqs
+
+# --- sequence validator (no Bio/NumPy) ---
+def is_valid_sequence(sequence):
+    for s in sequence:
+        if not (s == "A" or s == "C" or s == "G" or s == "T"):
+            return False
+    return True
+
+# --- Levenshtein distance (pure loops, matches Python logic) ---
+def get_levenshtein_distance(s1, s2):
+    if len(s1) > len(s2):
+        s1, s2 = s2, s1
+    # distances is a list 0..len(s1)
+    distances = []
+    for i in range(len(s1) + 1):
+        distances.append(i)
+    i2 = 0
+    for c2 in s2:
+        distances_ = [i2 + 1]
+        i1 = 0
+        for c1 in s1:
+            if c1 == c2:
+                distances_.append(distances[i1])
+            else:
+                a = distances[i1]      # substitution
+                b = distances[i1 + 1]  # deletion
+                c = distances_[-1]     # insertion
+                m = a if a < b else b
+                if c < m:
+                    m = c
+                distances_.append(1 + m)
+            i1 += 1
+        distances = distances_
+        i2 += 1
+    return distances[-1]
+
+# --- add_padding (right-pad with '-' to the max length) ---
+def add_padding(encoded_trs):
+    # encoded_trs: list[str]
+    max_len = 0
+    for s in encoded_trs:
+        if len(s) > max_len:
+            max_len = len(s)
+    out = []
+    for s in encoded_trs:
+        pad = max_len - len(s)
+        out.append(s + "-" * pad)
+    return out
+
+# Build distance matrix from symbol:motif pairs (passed via CLI)
+# Output is printed by the CLI; this function just computes the numbers.
+def _distance_matrix(pairs):
+    # pairs: list like ["A:ACT", "b:T", ...]
+    syms = []
+    motifs = []
+    # parse input
+    for p in pairs:
+        # split once on ':'
+        i = p.find(":")
+        if i == -1:
+            continue
+        sym = p[:i]
+        mot = p[i+1:]
+        syms.append(sym)
+        motifs.append(mot)
+
+    # compute all-vs-all edit distances
+    # if sym1==sym2 store motif length; else store Levenshtein(m1,m2)
+    out_lines = []
+    n = len(syms)
+    k = 0
+    while k < n:
+        s1 = syms[k]
+        m1 = motifs[k]
+        j = 0
+        while j < n:
+            s2 = syms[j]
+            m2 = motifs[j]
+            if s1 == s2:
+                val = len(m1)
+            else:
+                val = get_levenshtein_distance(m1, m2)
+            out_lines.append(s1 + "\t" + s2 + "\t" + str(val))
+            j += 1
+        k += 1
+    return out_lines
+
+# ---------- emitting / repeat lengths ----------
+def is_emitting_state(name):
+    if name.startswith("M"): return True
+    if name.startswith("I"): return True
+    if name.startswith("start_random_matches"): return True
+    if name.startswith("end_random_matches"): return True
+    return False
+
+def get_repeating_pattern_lengths(visited_states):
+    lengths = []
+    prev_start = -1
+    i = 0
+    while i < len(visited_states):
+        s = visited_states[i]
+        if s.startswith("unit_end") and prev_start != -1:
+            cur = 0
+            j = prev_start
+            while j < i:
+                if is_emitting_state(visited_states[j]):
+                    cur += 1
+                j += 1
+            lengths.append(cur)
+        if s.startswith("unit_start"):
+            prev_start = i
+        i += 1
+    return lengths
+
+def get_motifs_from_visited_states_and_region(visited_states, region):
+    lens = get_repeating_pattern_lengths(visited_states)
+    segs = []
+    added = 0
+    for l in lens:
+        segs.append(region[added:added + l])
+        added += l
+    return segs
+
+# ---------- motif counter ----------
+def get_motif_counter_from_csv_rows(rows):
+    # rows: each is comma-separated motifs for one VNTR, e.g. "ACT,TT,ACT"
+    counts = {}  # motif -> int
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        if row != "":
+            # split on ','
+            start = 0
+            j = 0
+            while j <= len(row):
+                if j == len(row) or row[j] == ",":
+                    mot = row[start:j]
+                    if mot != "":
+                        if mot in counts:
+                            counts[mot] = counts[mot] + 1
+                        else:
+                            counts[mot] = 1
+                    start = j + 1
+                j += 1
+        i += 1
+    # return as lines "motif\tcount"
+    out = []
+    for k in counts.keys():
+        out.append(k + "\t" + str(counts[k]))
+    return out
+
+# ---------- sorting helpers ----------
+def _replace_all(s, oldc):
+    # remove a single character 'oldc' from s
+    out = []
+    i = 0
+    while i < len(s):
+        if s[i] != oldc:
+            out.append(s[i])
+        i += 1
+    return "".join(out)
+
+def sort_pairs(method, pairs):
+    # pairs: each "sample_id\taligned_vntr"
+    # returns pairs in sorted order, same "id\tseq"
+    ids = []
+    seqs = []
+    # split pairs
+    i = 0
+    while i < len(pairs):
+        p = pairs[i]
+        tab = p.find("\t")
+        if tab == -1:
+            ids.append(p)
+            seqs.append("")
+        else:
+            ids.append(p[:tab])
+            seqs.append(p[tab+1:])
+        i += 1
+
+    idx = []
+    i = 0
+    while i < len(ids):
+        idx.append(i)
+        i += 1
+
+    if method == "name":
+        # sort by sample_id asc
+        # simple insertion sort to avoid relying on std sort details
+        j = 1
+        while j < len(idx):
+            k = j
+            while k > 0 and ids[idx[k]] < ids[idx[k-1]]:
+                tmp = idx[k]; idx[k] = idx[k-1]; idx[k-1] = tmp
+                k -= 1
+            j += 1
+    else:
+        # motif_count: sort by len(seq.replace('-', '')) desc
+        lengths = []
+        i = 0
+        while i < len(seqs):
+            no_dash = _replace_all(seqs[i], "-")
+            lengths.append(len(no_dash))
+            i += 1
+        j = 1
+        while j < len(idx):
+            k = j
+            while k > 0 and lengths[idx[k]] > lengths[idx[k-1]]:
+                tmp = idx[k]; idx[k] = idx[k-1]; idx[k-1] = tmp
+                k -= 1
+            j += 1
+
+    out = []
+    i = 0
+    while i < len(idx):
+        out.append(ids[idx[i]] + "\t" + seqs[idx[i]])
+        i += 1
+    return out
+
+# ---------- score matrix ----------
+# Build a "score matrix" from symbol->motif pairs.
+# Returns lines "sym1\t\nsym2\t<score>" plus two config lines:
+#   GAP_OPEN\t<float>
+#   GAP_EXT\t<float>
+def _score_matrix(
+    pairs,                 # ["A:ACT", "B:ACG", ...]
+    match_score,           # int
+    mismatch1,             # int
+    mismatch_gt1,          # int
+    gap_open_penalty,      # float as string -> parseFloat
+    gap_ext_penalty        # float as string -> parseFloat
+):
+    syms = []
+    motifs = []
+    i = 0
+    while i < len(pairs):
+        p = pairs[i]
+        j = p.find(":")
+        if j != -1:
+            syms.append(p[:j])
+            motifs.append(p[j+1:])
+        i += 1
+
+    out = []
+    # include gap settings as explicit rows
+    out.append("GAP_OPEN\t" + str(gap_open_penalty))
+    out.append("GAP_EXT\t" + str(gap_ext_penalty))
+
+    n = len(syms)
+    r = 0
+    while r < n:
+        s1 = syms[r]
+        m1 = motifs[r]
+        c = 0
+        while c < n:
+            s2 = syms[c]
+            m2 = motifs[c]
+            if s1 == s2:
+                score = match_score
+            else:
+                ed = get_levenshtein_distance(m1, m2)
+                # Python logic:
+                # cutoff = 1; if abs(len1-len2) <= 1: cutoff += max(len1,len2)//30
+                cutoff = 1
+                dlen = len(m1) - len(m2)
+                if dlen <= 1 and dlen >= -1:
+                    # integer division (floor)
+                    maxlen = len(m1)
+                    if len(m2) > maxlen:
+                        maxlen = len(m2)
+                    cutoff = cutoff + (maxlen // 30)
+                if ed <= cutoff:
+                    score = mismatch1
+                else:
+                    score = mismatch_gt1
+            out.append(s1 + "\t" + s2 + "\t" + str(score))
+            c += 1
+        r += 1
+    return out
+
+# ---------- parsing helpers ----------
+def _split_once(s, ch):
+    i = s.find(ch)
+    if i == -1:
+        return s, ""
+    return s[:i], s[i+1:]
+
+def _parse_sym_motif_pairs(pairs):  # ["a:ACT", "b:TT"] -> (["a","b"], ["ACT","TT"])
+    syms = []
+    motifs = []
+    i = 0
+    while i < len(pairs):
+        s, m = _split_once(pairs[i], ":")
+        if m != "":
+            syms.append(s)
+            motifs.append(m)
+        i += 1
+    return syms, motifs
+
+def _motif_len(symbol, syms, motifs):  # len of motif for given symbol (case-insensitive)
+    # returns 0 if not found
+    i = 0
+    c = symbol.lower()
+    while i < len(syms):
+        if syms[i] == c:
+            return len(motifs[i])
+        i += 1
+    return 0
+
+def _motif_seq(symbol, syms, motifs):
+    i = 0
+    c = symbol.lower()
+    while i < len(syms):
+        if syms[i] == c:
+            return motifs[i]
+        i += 1
+    return ""
+
+
+# ---------- cost for a pair ----------
+def _cost_pair(al1, al2, syms, motifs, allow_copy_change):
+    if len(al1) != len(al2):
+        # mirror Python raise
+        raise Exception("The length of two sequences should be identical.")
+    total = 0
+    i = 0
+    while i < len(al1):
+        c1 = al1[i]
+        c2 = al2[i]
+        if c1 != c2:
+            if c1 != "-" and c2 != "-":
+                s1 = _motif_seq(c1, syms, motifs)
+                s2 = _motif_seq(c2, syms, motifs)
+                total += get_levenshtein_distance(s1, s2)
+            else:
+                if allow_copy_change:
+                    total += 1
+                else:
+                    if c1 == "-":
+                        total += _motif_len(c2, syms, motifs)
+                    else:
+                        total += _motif_len(c1, syms, motifs)
+        i += 1
+    return total
+
+# ---------- total cost over list (adjacent pairs) ----------
+def _total_cost(aligned_list, syms, motifs, allow_copy_change):
+    if len(aligned_list) <= 1:
+        return 0
+    s = 0
+    i = 0
+    while i + 1 < len(aligned_list):
+        s += _cost_pair(aligned_list[i], aligned_list[i+1], syms, motifs, allow_copy_change)
+        i += 1
+    return s
+
+
+# ---------- sort by manually ----------
+# pairs: ["sample_id\taligned_vntr", ...]
+# order_lines: sample ids (one per line) from a file
+def _sort_by_manually(pairs, order_lines):
+    # build map id -> seq
+    m = {}  # id -> seq
+    i = 0
+    while i < len(pairs):
+        p = pairs[i]
+        t = p.find("\t")
+        if t != -1:
+            m[p[:t]] = p[t+1:]
+        i += 1
+    out = []
+    i = 0
+    while i < len(order_lines):
+        sid = order_lines[i].strip()
+        if sid in m:
+            out.append(sid + "\t" + m[sid])
+        i += 1
+    return out
+
+
+# ---------- motif marks ----------
+# input rows: ["sample_id\tmotif1,motif2,...", ...]
+# region file format:
+# >sample
+# region1,start,end\tregion2,start,end
+def _motif_marks(rows, region_rows):
+    # parse region file
+    reg = {}  # id -> list of (region,start,end) tuples as strings
+    i = 0
+    cur_id = ""
+    while i < len(region_rows):
+        ln = region_rows[i].strip()
+        if ln.startswith(">"):
+            cur_id = ln[1:]
+            reg[cur_id] = []
+        elif ln != "":
+            # split by tabs, then parse region,start,end
+            start = 0
+            j = 0
+            while j <= len(ln):
+                if j == len(ln) or ln[j] == "\t":
+                    item = ln[start:j]
+                    if item != "":
+                        a, rest = _split_once(item, ",")
+                        b, c = _split_once(rest, ",")
+                        reg[cur_id].append((a, b, c))
+                    start = j + 1
+                j += 1
+        i += 1
+
+    # build output marks
+    out = []  # "id\tmarkstring"
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        t = row.find("\t")
+        if t == -1:
+            i += 1
+            continue
+        sid = row[:t]
+        motif_csv = row[t+1:]
+        # split motifs by ","
+        motifs = []
+        a = 0
+        b = 0
+        while b <= len(motif_csv):
+            if b == len(motif_csv) or motif_csv[b] == ",":
+                mseg = motif_csv[a:b]
+                if mseg != "":
+                    motifs.append(mseg)
+                a = b + 1
+            b += 1
+
+        # compute marks
+        marks = ""
+        cumul = 0
+        # fall back if not in reg: all 'X'
+        rlist = reg[sid] if sid in reg else None
+        j = 0
+        while j < len(motifs):
+            mlen = len(motifs[j])
+            mstart = cumul
+            mend = cumul + mlen
+            flagI = False
+            if rlist is not None:
+                k = 0
+                while k < len(rlist):
+                    region, rs, re = rlist[k]
+                    if region == "intron":
+                        # any overlap?
+                        # int(start) <= mstart < int(end) or int(start) <= mend < int(end)
+                        # or mstart <= int(start) <= int(end) < mend
+                        is_ = int(rs)
+                        ie_ = int(re)
+                        if (is_ <= mstart and mstart < ie_) or (is_ <= mend and mend < ie_) or (mstart <= is_ and ie_ < mend):
+                            flagI = True
+                            break
+                    k += 1
+            if flagI:
+                marks += "I"
+            else:
+                marks += "X"
+            cumul = mend
+            j += 1
+
+            # ensure length matches number of motifs by design
+
+        out.append(sid + "\t" + marks)
+        i += 1
+
+    return out
+
+
+# ---------- sample->population ----------
+def _sample_to_population(rows, sep, sample_idx, pop_idx):
+    out = []  # lines "sample\tpopulation"
+    i = 0
+    while i < len(rows):
+        ln = rows[i].rstrip("\n")
+        if ln == "" or ln.startswith("#"):
+            i += 1
+            continue
+        # split by 'sep'
+        fields = []
+        a = 0
+        b = 0
+        while b <= len(ln):
+            if b == len(ln) or ln[b] == sep:
+                fields.append(ln[a:b])
+                a = b + 1
+            b += 1
+        if sample_idx < len(fields) and pop_idx < len(fields):
+            out.append(fields[sample_idx] + "\t" + fields[pop_idx])
+        i += 1
+    return out

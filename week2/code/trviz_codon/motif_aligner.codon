@@ -1,0 +1,174 @@
+# Full alignment orchestration in Codon:
+# - Build input multi-FASTA from (id, encoded_seq) rows
+# - Compose command line for MAFFT / MUSCLE / CLUSTALO (no Biopython)
+# - Parse aligned FASTA
+# - Return command string to run (Python will exec it)
+
+from .utils import PRIVATE_MOTIF_LABEL
+
+# --- tiny utils ---
+
+def _write_fasta(path: str, ids: List[str], seqs: List[str]):
+    f = open(path, "w")
+    i = 0
+    while i < len(ids):
+        f.write(">")
+        f.write(ids[i])
+        f.write("\n")
+        f.write(seqs[i])
+        f.write("\n")
+        i += 1
+    f.close()
+
+def _parse_fasta(path: str):
+    # returns TSV "id<TAB>seq" lines
+    lines = []
+    f = open(path, "r")
+    buf = f.read()
+    f.close()
+
+    cur_id = ""
+    cur_seq = ""
+    # splitlines() handles \n / \r\n cleanly, drops the newline chars
+    for raw in buf.splitlines():
+        if len(raw) == 0:
+            continue
+        if raw[0] == '>':
+            # flush previous record
+            if cur_id != "":
+                lines.append(cur_id + "\t" + cur_seq)
+            # new id = first token after '>'
+            i = 1
+            while i < len(raw) and (raw[i] == ' ' or raw[i] == '\t'):
+                i += 1
+            start = i
+            while i < len(raw) and (raw[i] != ' ' and raw[i] != '\t'):
+                i += 1
+            cur_id = raw[start:i]
+            cur_seq = ""
+        else:
+            cur_seq += raw
+
+    if cur_id != "":
+        lines.append(cur_id + "\t" + cur_seq)
+    return lines
+
+def _which(exe: str):
+    # minimal PATH search, returns first hit or ""
+    import os
+    p = os.getenv("PATH")
+    if p is None:
+        return ""
+    start = 0
+    i = 0
+    while i <= len(p):
+        if i == len(p) or p[i] == ':':
+            comp = p[start:i]
+            if len(comp) > 0:
+                cand = comp + "/" + exe
+                # try open for read to test existence & perms
+                try:
+                    f = open(cand, "r")
+                    f.close()
+                    return cand
+                except:
+                    pass
+            start = i + 1
+        i += 1
+    return ""
+
+# --- command composers ---
+
+def _mafft_cmd(mafft_path: str, input_fa: str, output_fa: str, preserve_order: bool):
+    # default flags
+    # --anysymbol allows our alphabet (letters, '?', '-')
+    # --auto lets mafft choose method by size
+    cmd = mafft_path + " --auto --anysymbol"
+    if preserve_order:
+        # keep sequence order if possible; if unsupported, mafft ignores unknown flags
+        cmd += " --preservecase"
+    else:
+        cmd += " --reorder"
+    cmd += " " + input_fa + " > " + output_fa
+    return cmd
+
+def _muscle_cmd(muscle_path: str, input_fa: str, output_fa: str, preserve_order: bool):
+    # MUSCLE v5 CLI (common): -align input -output output
+    # (There is no strict "preserve order" flag; MUSCLE may reorder by default.)
+    cmd = muscle_path + " -align " + input_fa + " -output " + output_fa
+    return cmd
+
+def _clustalo_cmd(clustalo_path: str, input_fa: str, output_fa: str, preserve_order: bool):
+    # Clustal Omega: --in --out --force; order may be changed unless --order=input is used
+    cmd = clustalo_path + " --in " + input_fa + " --out " + output_fa + " --force"
+    if preserve_order:
+        cmd += " --order=input"
+    return cmd
+
+# --- public routes ---
+
+# aligner.align:
+# args:
+#   method: 'mafft' | 'muscle' | 'clustalo' | 'star'
+#   preserve_order: 0 or 1
+#   tool_path: string or "" (we'll resolve with PATH if "")
+#   work_dir: output directory for temp files (must exist)
+#   ids & seqs: provided as parallel arrays from the worker
+#
+# returns lines:
+#   OK
+#   <count>
+#   CMD\t<shell_command_to_run>
+#   IN\t<input_fasta>
+#   OUT\t<output_fasta>
+#   IDS\t<id>    (one per input, in the original order; for star we still feed MSA a multi-fasta)
+# After Python runs CMD, it should call aligner.collect OUT to parse the aligned fasta.
+def aligner_align(method: str,
+                  preserve_order: int,
+                  tool_path: str,
+                  work_dir: str,
+                  ids: List[str],
+                  seqs: List[str]):
+    # sanitize & resolve tool
+    m = method
+    if m != "mafft" and m != "muscle" and m != "clustalo" and m != "star":
+        raise Exception("unsupported aligner: " + m)
+
+    # resolve executable path
+    exe = tool_path if len(tool_path) > 0 else m
+    abs_exe = _which(exe)
+    if len(abs_exe) == 0:
+        raise Exception("aligner not found on PATH: " + exe)
+
+    # write input fasta
+    # star == multi-fasta too (simple version; your original may do progressive/seed; we can extend if needed)
+    in_fa = work_dir + "/trviz_in.fa"
+    out_fa = work_dir + "/trviz_out.fa"
+    _write_fasta(in_fa, ids, seqs)
+
+    # compose command
+    cmd = ""
+    if m == "mafft" or m == "star":
+        cmd = _mafft_cmd(abs_exe, in_fa, out_fa, preserve_order == 1)
+    elif m == "muscle":
+        cmd = _muscle_cmd(abs_exe, in_fa, out_fa, preserve_order == 1)
+    else:
+        cmd = _clustalo_cmd(abs_exe, in_fa, out_fa, preserve_order == 1)
+
+    # emit response
+    out = []
+    out.append("CMD\t" + cmd)
+    out.append("IN\t" + in_fa)
+    out.append("OUT\t" + out_fa)
+    # pass through the input id order for the shim (if it wants to assert)
+    i = 0
+    while i < len(ids):
+        out.append("IDS\t" + ids[i])
+        i += 1
+    return out
+
+# aligner.collect:
+#   arg: path to aligned fasta (OUT)
+# returns "ID<TAB>ALIGNEDSEQ" lines (no OK header here; worker adds OK/count)
+def aligner_collect(out_path: str):
+    return _parse_fasta(out_path)

@@ -1,0 +1,199 @@
+from .utils import (
+  INDEX_TO_CHR,          # same symbol alphabet as Python
+  PRIVATE_MOTIF_LABEL,   # "?"
+  get_levenshtein_distance,
+)
+
+# -- small helpers --
+def _split_csv(row):
+    out = []
+    i = 0
+    start = 0
+    while i <= len(row):
+        if i == len(row) or row[i] == ",":
+            seg = row[start:i]
+            if seg != "":
+                out.append(seg)
+            start = i + 1
+        i += 1
+    return out
+
+def _count_motifs(rows):
+    counts = {}      # motif -> int
+    i = 0
+    while i < len(rows):
+        for m in _split_csv(rows[i]):
+            if m in counts:
+                counts[m] = counts[m] + 1
+            else:
+                counts[m] = 1
+        i += 1
+    return counts
+
+def _most_common(counts):
+    # returns [(motif, count)] sorted by count desc, then motif asc for determinism
+    items = []
+    for k in counts.keys():
+        items.append((k, counts[k]))
+    # simple insertion sort (Codon doesn’t have sort yet)
+    i = 1
+    while i < len(items):
+        j = i
+        while j > 0:
+            a = items[j-1]
+            b = items[j]
+            # sort by count desc, then motif asc
+            swap = False
+            if a[1] < b[1]:
+                swap = True
+            elif a[1] == b[1] and a[0] > b[0]:
+                swap = True
+            if swap:
+                tmp = items[j-1]; items[j-1] = items[j]; items[j] = tmp
+                j -= 1
+            else:
+                break
+        i += 1
+    return items
+
+def _choose_threshold(counts, max_labels):
+    # choose smallest threshold t s.t. |{m : count(m) > t}| <= max_labels
+    # try all distinct counts (and -1 to allow "all normal")
+    # collect unique counts
+    uniq = []
+    for k in counts.keys():
+        c = counts[k]
+        present = False
+        q = 0
+        while q < len(uniq):
+            if uniq[q] == c:
+                present = True; break
+            q += 1
+        if not present:
+            uniq.append(c)
+    # include -1 to allow "no private" if fits
+    uniq.append(-1)
+    # simple bubble sort asc
+    n = len(uniq); a = 0
+    while a < n:
+        b = a + 1
+        while b < n:
+            if uniq[a] > uniq[b]:
+                tmp = uniq[a]; uniq[a] = uniq[b]; uniq[b] = tmp
+            b += 1
+        a += 1
+
+    t = uniq[0]
+    i = 0
+    while i < len(uniq):
+        cand = uniq[i]
+        # count normals = counts > cand
+        normals = 0
+        for k in counts.keys():
+            if counts[k] > cand:
+                normals += 1
+        if normals <= max_labels:
+            t = cand
+            break
+        i += 1
+    return t
+
+def _assign_symbols(normal_motifs):
+    # returns motif->symbol and symbol->motif (lowercase symbols)
+    # normal_motifs is list of motifs in final order (most_common filtering)
+    if len(normal_motifs) > len(INDEX_TO_CHR) - 1:  # reserve one for private
+        raise Exception("Too many motifs to label")
+    m2s = {}
+    s2m = {}
+    i = 0
+    while i < len(normal_motifs):
+        sym = INDEX_TO_CHR[i]      # take as-is; Python code accepts any from this alphabet
+        m = normal_motifs[i]
+        m2s[m] = sym
+        s2m[sym] = m
+        i += 1
+    return m2s, s2m
+
+def _encode_rows(rows, m2s, threshold, counts):
+    # encode each CSV row into a string: normals -> their symbol; privates -> PRIVATE_MOTIF_LABEL
+    out = []
+    i = 0
+    while i < len(rows):
+        enc = ""
+        for m in _split_csv(rows[i]):
+            if counts[m] > threshold:
+                enc += m2s[m]
+            else:
+                enc += PRIVATE_MOTIF_LABEL
+        out.append(enc)
+        i += 1
+    return out
+
+# --------------- public entry points ----------------
+
+# (1) find threshold only
+# Input: label_count (-1 for None), then rows (comma-joined motifs)
+# Output lines (after OK/count):
+#   THRESH  <int>
+def encoder_find_threshold(label_count, rows):
+    counts = _count_motifs(rows)
+    # compute capacity
+    max_labels = (len(INDEX_TO_CHR) - 1)
+    if label_count != -1:
+        # reserve one for private
+        max_labels = label_count - 1
+        if max_labels < 0:
+            max_labels = 0
+    t = _choose_threshold(counts, max_labels)
+    out = []
+    out.append("THRESH\t" + str(t))
+    return out
+
+# (2) full encode (but no score matrix here; Python will ask utils route for it)
+# Input: label_count (-1 if None), auto_flag (0/1), then rows
+# Output lines:
+#   THRESH  <int>
+#   MAP motif  symbol  count    (multiple)
+#   ENC encoded_string         (multiple)
+def encoder_encode(label_count, auto_flag, rows):
+    counts = _count_motifs(rows)
+    # capacity
+    if auto_flag == 1:
+        max_labels = (len(INDEX_TO_CHR) - 1)
+    else:
+        max_labels = (label_count - 1) if label_count != -1 else (len(INDEX_TO_CHR) - 1)
+        if max_labels < 0:
+            max_labels = 0
+    # choose threshold
+    t = _choose_threshold(counts, max_labels)
+
+    # partition motifs
+    common = _most_common(counts)
+    normals = []
+    i = 0
+    while i < len(common):
+        if common[i][1] > t:
+            normals.append(common[i][0])
+        i += 1
+
+    if len(normals) > max_labels:
+        raise Exception("Too many motifs to label")
+
+    m2s, s2m = _assign_symbols(normals)
+    enc = _encode_rows(rows, m2s, t, counts)
+
+    out = []
+    out.append("THRESH\t" + str(t))
+    # MAP block (deterministic order: by most_common of normals)
+    i = 0
+    while i < len(common):
+        mot = common[i][0]
+        if mot in m2s:
+            out.append("MAP\t" + mot + "\t" + m2s[mot] + "\t" + str(counts[mot]))
+        i += 1
+    # ENC block (preserve input order)
+    i = 0
+    while i < len(enc):
+        out.append("ENC\t" + enc[i])
+        i += 1
+    return out

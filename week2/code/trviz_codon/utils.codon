@@ -1,5 +1,5 @@
 # Utils.py codon port
-
+from collections import List
 # constants 
 LOWERCASE_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 UPPERCASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -97,7 +97,7 @@ def get_levenshtein_distance(s1, s2):
         i2 += 1
     return distances[-1]
 
-# --- add_padding (right-pad with '-' to the max length) ---
+# --- add_padding  ---
 def add_padding(encoded_trs):
     # encoded_trs: list[str]
     max_len = 0
@@ -348,6 +348,17 @@ def _split_once(s, ch):
         return s, ""
     return s[:i], s[i+1:]
 
+def split_csv_row(s: str) -> List[str]:
+    out: List[str] = []
+    cur = s
+    while True:
+        head, tail = _split_once(cur, ',')
+        out.append(head)
+        if tail == "":
+            break
+        cur = tail
+    return out
+
 def _parse_sym_motif_pairs(pairs):  # ["a:ACT", "b:TT"] -> (["a","b"], ["ACT","TT"])
     syms = []
     motifs = []
@@ -532,6 +543,32 @@ def _motif_marks(rows, region_rows):
         i += 1
 
     return out
+
+def _repeat(ch: str, n: int) -> str:
+    out = ""
+    i = 0
+    while i < n:
+        out = out + ch
+        i += 1
+    return out
+
+def print_progress_bar(
+    iteration: int,
+    total: int,
+    prefix: str = "",
+    suffix: str = "",
+    length: int = 30
+):
+    # Simple integer-percent progress bar (keeps Codon-friendly string ops)
+    if total <= 0:
+        total = 1
+    filled = (length * iteration) // total
+    if filled < 0: filled = 0
+    if filled > length: filled = length
+
+    bar = _repeat("█", filled) + _repeat("-", length - filled)
+    percent = (100 * iteration) // total
+    print(prefix + " |" + bar + "| " + str(percent) + "% " + suffix)
 
 
 # ---------- sample->population ----------

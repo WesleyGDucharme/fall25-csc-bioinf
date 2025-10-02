@@ -146,3 +146,94 @@ def refine_pairs(rows):  # no type annotations to keep Codon happy
         t += 1
     return out
 
+def _levenshtein(a: str, b: str) -> int:
+    if len(a) < len(b):
+        tmp = a; a = b; b = tmp
+    # now len(a) >= len(b)
+    prev = [0] * (len(b) + 1)
+    j = 0
+    while j <= len(b):
+        prev[j] = j
+        j += 1
+    i = 1
+    while i <= len(a):
+        cur0 = i
+        j = 1
+        while j <= len(b):
+            cost = 0 if a[i-1] == b[j-1] else 1
+            ins = cur0 + 1
+            dele = prev[j] + 1
+            subs = prev[j-1] + cost
+            cur = ins if ins < dele else dele
+            if subs < cur:
+                cur = subs
+            prev[j-1] = cur0
+            cur0 = cur
+            j += 1
+        prev[len(b)] = cur0
+        i += 1
+    return prev[len(b)]
+
+# Greedy segmentation fallback (fallback may not have same outputs as the alternative):
+# At position i, pick motif m minimizing ED(seq[i : i+len(m)], m); advance by len(m).
+# Emits:
+#   - encoded symbol string (lowercase letters etc. as supplied by caller)
+#   - CSV of motif strings (DEC row)
+def dp_decompose_greedy(seq: str, symbol_to_motif: Dict[str, str]):
+    n = len(seq)
+    encoded_syms = ""
+    dec_csv_parts: List[str] = []
+    i = 0
+    # Precompute motif list for deterministic order
+    syms: List[str] = []
+    for k in symbol_to_motif:
+        syms.append(k)
+    # simple stable sort
+    a = 0
+    while a < len(syms) - 1:
+        b = a + 1
+        while b < len(syms):
+            if syms[b] < syms[a]:
+                tmp = syms[a]; syms[a] = syms[b]; syms[b] = tmp
+            b += 1
+        a += 1
+
+    while i < n:
+        best_sym = ""
+        best_mot = ""
+        best_cost = 1_000_000
+        sidx = 0
+        while sidx < len(syms):
+            s = syms[sidx]
+            m = symbol_to_motif[s]
+            L = len(m)
+            # slice; if near end, compare against the remaining tail
+            end = i + L
+            if end > n:
+                end = n
+            chunk = seq[i:end]
+            # compare; if chunk shorter than motif, distance accounts for tail inserts
+            c = _levenshtein(chunk, m)
+            if c < best_cost:
+                best_cost = c
+                best_sym = s
+                best_mot = m
+            sidx += 1
+        # append choice
+        encoded_syms = encoded_syms + best_sym
+        dec_csv_parts.append(best_mot)
+        i += len(best_mot)  # advance by motif length (greedy)
+        # safety: if motif somehow empty (shouldn't), break
+        if len(best_mot) == 0:
+            break
+
+    # join DEC CSV
+    dec_csv = ""
+    j = 0
+    while j < len(dec_csv_parts):
+        if j > 0:
+            dec_csv = dec_csv + ","
+        dec_csv = dec_csv + dec_csv_parts[j]
+        j += 1
+    return (encoded_syms, dec_csv)
+

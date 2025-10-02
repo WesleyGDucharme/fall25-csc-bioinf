@@ -16,7 +16,11 @@ Throughout my work on deliverable 2 I used ChatGPT to:
 - Write automation scripts for testing and evaluation.
   * Ex: Had it help me make the evaluate.sh file which ran the tests on both the codon and python versions and had it help me make small tests that targeted specifc files/function I ported to codon.
 
+- Helped with busy work.
+ * Documenttation and commented function labels were done by the LLM to help save time as I made this swap to porting Trviz very last minute. 
+
 Notes:
 - I edited and ran all code locally to verify correctness.
 - AI suggestions were adapted and integrated into my own implementation unless a version the ai suggested worked really well the first time.
 - Not all outputs from ChatGPT were used directly — in some cases I rolled back to earlier versions or of course ignored the answers and solution prototypes that I knew were wrong or would not work.
+

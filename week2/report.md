@@ -147,5 +147,7 @@ week2/
 │  └─ test_codon_port_smoke.py   # added smoke tests for the Codon port components  
 └─ evaluate.sh                    # builds worker & CLI; runs original tests and the new small smoke tests  
 
+The other .py files you see in week2/code are the original .py files from Trviz.  
 
-  The other .py files you see in code are the original .py files from Trviz.  
+Estimated time to complete: 
+Spent more than 20 hrs on BioPython port before I gave up on that one and swapped to Trviz, where I spent ~ 18 hours on this one.

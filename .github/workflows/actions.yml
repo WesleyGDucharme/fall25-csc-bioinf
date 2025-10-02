@@ -33,3 +33,12 @@ jobs:
         run: |
           chmod +x week1/evaluate.sh
           bash week1/evaluate.sh
+      - name: Week 2
+        working-directory: week2
+        env:
+          # Codon already added to PATH earlier; this ensures it's available here too
+          PATH: ${{ env.PATH }}:${{ github.workspace }}/.codon/bin:${{ runner.temp }}/.codon/bin:${{ home }}/.codon/bin
+        run: |
+          python -m pip install -U pip pytest
+          chmod +x evaluate.sh
+          ./evaluate.sh

@@ -119,32 +119,33 @@ Decomposer DP parity
 
 File structure and contents outline  
 -----------------------------------
-"""
-week2/  
-  code/  
-    trviz/                     # Python API (unchanged entry points)  
-      _codon_bridge.py         # persistent worker bridge (always importable)  
-      utils.py                 # routes to Codon when TRVIZ_IMPL=codon  
-      decomposer.py            # Cython DP preferred; Codon refine + DP fallback  
-      motif_encoder.py         # Codon for threshold/encode  
-      motif_aligner.py         # optional Codon MAFFT  
-      main.py                  # original Python CLI  
-    trviz_codon/               # Codon sources  
-      utils.codon  
-      motif_encoder.codon  
-      motif_aligner.codon  
-      decomposer.codon         # greedy DP fallback  
-      worker.codon             # persistent worker  
-      main.codon               # standalone Codon CLI  
-      __init__.py / __init__.codon  
-    trviz_codon_worker         # built worker binary (from evaluate.sh)  
-    trviz_codon_cli            # built CLI binary (from evaluate.sh)  
-  data/  
-    demo.fasta  
-  test/  
-    test_decomposer.py  
-    test_refinement.py  
-    test_codon_port_smoke.py   # added smoke tests for the Codon port components  
-  evaluate.sh                  # builds worker & CLI; runs original tests and the new small smoke tests  
-"""
+
+week2/
+├─ code/
+│  ├─ trviz/                     # Python API (unchanged entry points)
+│  │  ├─ _codon_bridge.py        # persistent worker bridge (always importable)
+│  │  ├─ utils.py                # routes to Codon when TRVIZ_IMPL=codon
+│  │  ├─ decomposer.py           # Cython DP preferred; Codon refine + DP fallback
+│  │  ├─ motif_encoder.py        # Codon for threshold/encode
+│  │  ├─ motif_aligner.py        # optional Codon MAFFT
+│  │  └─ main.py                 # original Python CLI
+│  ├─ trviz_codon/               # Codon sources
+│  │  ├─ utils.codon
+│  │  ├─ motif_encoder.codon
+│  │  ├─ motif_aligner.codon
+│  │  ├─ decomposer.codon        # greedy DP fallback
+│  │  ├─ worker.codon            # persistent worker
+│  │  ├─ main.codon              # standalone Codon CLI
+│  │  └─ __init__.py / __init__.codon
+│  ├─ trviz_codon_worker         # built worker binary (from evaluate.sh)
+│  └─ trviz_codon_cli            # built CLI binary (from evaluate.sh)
+├─ data/
+│  └─ demo.fasta
+├─ test/
+│  ├─ test_decomposer.py
+│  ├─ test_refinement.py
+│  └─ test_codon_port_smoke.py   # added smoke tests for the Codon port components
+└─ evaluate.sh                    # builds worker & CLI; runs original tests and the new small smoke tests
+
+
   The other .py files you see in code are the original .py files from Trviz.  

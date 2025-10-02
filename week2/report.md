@@ -119,7 +119,7 @@ Decomposer DP parity
 
 File structure and contents outline  
 -----------------------------------
-
+"""
 week2/  
   code/  
     trviz/                     # Python API (unchanged entry points)  
@@ -146,5 +146,5 @@ week2/
     test_refinement.py  
     test_codon_port_smoke.py   # added smoke tests for the Codon port components  
   evaluate.sh                  # builds worker & CLI; runs original tests and the new small smoke tests  
-
+"""
   The other .py files you see in code are the original .py files from Trviz.  

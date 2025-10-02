@@ -103,7 +103,7 @@ I/O differences
 
 - Codon File doesn’t have .readline(); iterate with for line in fh.
 
-- When reading/writing FASTA in Codon, we avoid BioPython entirely.
+- When reading/writing FASTA in Codon, this avoids BioPython entirely.
 
 Imports & stdlib
 
@@ -112,6 +112,39 @@ Imports & stdlib
 Decomposer DP parity
 
 - The Codon decomposer.dp is greedy and not a full DP. It’s included for portability/completeness.
-  - This ported greedy version does not give the exact output as Cython/Python fallback version does but it is very close and I mainly implemented it to attempt to replicate their results in codon.
+  - This ported greedy version does not give the exact output as Cython/Python fallback version does but it is very close (I think based on looking at its outputs it is often off by 1 letter) and I tried to implement it in an attempt to replicate their results using just codon.
 
 - For exact behavior, keep using the Cython DP (DP_CY mode) in Python. Which is what we do in the main running of the tests in evaluate.sh.
+
+
+File structure and contents outline
+-----------------------------------
+
+week2/
+  code/
+    trviz/                     # Python API (unchanged entry points)
+      _codon_bridge.py         # persistent worker bridge (always importable)
+      utils.py                 # routes to Codon when TRVIZ_IMPL=codon
+      decomposer.py            # Cython DP preferred; Codon refine + DP fallback
+      motif_encoder.py         # Codon for threshold/encode
+      motif_aligner.py         # optional Codon MAFFT
+      main.py                  # original Python CLI
+    trviz_codon/               # Codon sources
+      utils.codon
+      motif_encoder.codon
+      motif_aligner.codon
+      decomposer.codon         # greedy DP fallback
+      worker.codon             # persistent worker
+      main.codon               # standalone Codon CLI
+      __init__.py / __init__.codon
+    trviz_codon_worker         # built worker binary (from evaluate.sh)
+    trviz_codon_cli            # built CLI binary (from evaluate.sh)
+  data/
+    demo.fasta
+  test/
+    test_decomposer.py
+    test_refinement.py
+    test_codon_port_smoke.py   # added smoke tests for the Codon port components
+  evaluate.sh                  # builds worker & CLI; runs original tests and the new small smoke tests
+
+  The other .py files you see in code are the original .py files from Trviz.

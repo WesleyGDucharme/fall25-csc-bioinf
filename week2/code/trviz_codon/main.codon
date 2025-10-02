@@ -1,0 +1,246 @@
+import sys
+from typing import Dict, List
+from os import system
+# local imports
+import utils
+import decomposer
+from .utils import split_csv_row
+
+# ---------- tiny helpers ----------
+def usage() -> str:
+    return (
+        "Usage:\n"
+        "  trviz_codon_cli --input <FASTA> (--motifs M1,M2,... | --motif-file FILE)\n"
+        "                  [--out OUT.tsv] [--aligner none|mafft]\n"
+        "                  [--match N] [--mismatch N] [--insertion N] [--deletion N]\n"
+        "                  [--verbose]\n"
+        "\n"
+        "Notes:\n"
+        "  * MAFFT requires it be installed and on your PATH.\n"
+        "  * This Codon CLI uses the Codon DP fallback (may differ from Cython DP).\n"
+    )
+
+def die(msg: str, code: int = 2):
+    print("ERROR: " + msg)
+    print(usage())
+    sys.exit(code)
+
+def startswith(s: str, p: str) -> bool:
+    return s[:len(p)] == p
+
+def coerce_pairs(ids_in, seqs_in):
+    out_ids: List[str] = []
+    out_seqs: List[str] = []
+    n = len(ids_in)
+    if len(seqs_in) < n:
+        n = len(seqs_in)
+    i = 0
+    while i < n:
+        idv = ids_in[i]
+        sv  = seqs_in[i]
+        if (idv is not None) and (sv is not None) and (len(idv) > 0) and (len(sv) > 0):
+            out_ids.append(idv)
+            out_seqs.append(sv)
+        i += 1
+    return out_ids, out_seqs
+
+# very small CSV splitter (no quotes)
+def split_csv(s: str) -> List[str]:
+    out: List[str] = []
+    cur = ""
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == ',':
+            out.append(cur)
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    out.append(cur)
+    return out
+
+# ---------- naive arg parser ----------
+def parse_args(argv: List[str]) -> Dict[str, str]:
+    a: Dict[str, str] = {}
+    i = 1
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--help" or tok == "-h":
+            a["help"] = "1"
+        elif tok == "--verbose":
+            a["verbose"] = "1"
+        elif tok[:2] == "--":
+            if i + 1 >= len(argv):
+                die("flag " + tok + " requires a value")
+            a[tok[2:]] = argv[i + 1]
+            i += 1
+        else:
+            die("unexpected argument: " + tok)
+        i += 1
+    return a
+
+# ---------- FASTA I/O ----------
+def write_fasta(path: str, ids: List[str], seqs: List[str]):
+    fh = open(path, "w")
+    i = 0
+    while i < len(ids):
+        fh.write(">" + ids[i] + "\n")
+        # simple 60-col wrap
+        s = seqs[i]
+        j = 0
+        while j < len(s):
+            fh.write(s[j:j+60] + "\n")
+            j += 60
+        i += 1
+    fh.close()
+
+def read_fasta(path: str):
+    return utils.get_sample_and_sequence_from_fasta(path)
+
+# ---------- MAFFT integration ----------
+# Writes in.fa, runs mafft, reads out.fa
+def run_mafft(in_path: str, out_path: str, verbose: bool):
+    cmd = "/usr/bin/mafft --auto --anysymbol --preservecase " + in_path + " > " + out_path
+    if verbose:
+        print("[MAFFT] " + cmd)
+    # NOTE: If your Codon build doesn't expose system(), replace this with whatever you used in motif_aligner.codon.
+    # In many Codon installs, system() is available:
+    system(cmd)
+
+# ---------- DP wrapper (Codon fallback) ----------
+# Build symbol->motif as a..z,A..Z,0..9 order (like Encoder)
+def build_symbol_map(motifs: List[str]) -> Dict[str, str]:
+    letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    m: Dict[str, str] = {}
+    i = 0
+    while i < len(motifs) and i < len(letters):
+        m[letters[i:i+1]] = motifs[i]
+        i += 1
+    return m
+
+# Compose a human-readable motif list from encoded symbols
+def decode_symbols(enc: str, sym2mot: Dict[str, str]) -> List[str]:
+    out: List[str] = []
+    i = 0
+    while i < len(enc):
+        sym = enc[i:i+1]
+        mot = sym2mot.get(sym)
+        if mot is None:
+            mot = sym
+        out.append(mot)
+        i += 1
+    return out
+
+# ---------- main pipeline ----------
+def main():
+    args = parse_args(sys.argv)
+    if ("help" in args) or (len(args) == 0):
+        print(usage())
+        sys.exit(0)
+
+    # required/optional args (use membership test + fallback)
+    in_path    = args["input"]      if ("input"      in args) else ""
+    motifs_csv = args["motifs"]     if ("motifs"     in args) else ""
+    motif_file = args["motif-file"] if ("motif-file" in args) else ""
+    out_path   = args["out"]        if ("out"        in args) else "trviz_decomposed.tsv"
+    aligner    = args["aligner"]    if ("aligner"    in args) else "none"
+    verbose    = ("verbose" in args)
+
+    match_s    = args["match"]      if ("match"      in args) else ""
+    mismatch_s = args["mismatch"]   if ("mismatch"   in args) else ""
+    ins_s      = args["insertion"]  if ("insertion"  in args) else ""
+    del_s      = args["deletion"]   if ("deletion"   in args) else ""
+
+    if in_path == "":
+        die("missing --input")
+    if (motifs_csv == "") and (motif_file == ""):
+        die("provide --motifs or --motif-file")
+
+    match    =  2  if (match_s    == "") else int(match_s)
+    mismatch = -1  if (mismatch_s == "") else int(mismatch_s)
+    ins      = -1  if (ins_s      == "") else int(ins_s)
+    dele     = -1  if (del_s      == "") else int(del_s)
+
+    # parse motifs
+    motifs: List[str] = []
+    if motif_file != "":
+        fh = open(motif_file)
+        for line in fh:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            motifs.append(line)
+        fh.close()
+    else:
+        motifs = split_csv(motifs_csv)
+
+    if verbose:
+        print("[INFO] input=" + in_path)
+        print("[INFO] motifs=" + ",".join(motifs))
+        print("[INFO] aligner=" + aligner)
+        print("[INFO] out=" + out_path)
+
+    # read (or align then read)
+    ids_opt: List[Optional[str]]
+    seqs_opt: List[Optional[str]]
+    ids: List[str]
+    seqs: List[str]
+
+    if aligner == "none":
+        ids_opt, seqs_opt = read_fasta(in_path)
+        ids, seqs = coerce_pairs(ids_opt, seqs_opt)
+    elif aligner == "mafft":
+        in_tmp = "trviz_in.fa"
+        out_tmp = "trviz_out.fa"
+        ids_opt, seqs_opt = read_fasta(in_path)
+        ids, seqs = coerce_pairs(ids_opt, seqs_opt)
+        write_fasta(in_tmp, ids, seqs)
+        run_mafft(in_tmp, out_tmp, verbose)
+        ids2_opt, seqs2_opt = read_fasta(out_tmp)
+        ids, seqs = coerce_pairs(ids2_opt, seqs2_opt)
+    else:
+        die("unknown --aligner " + aligner)
+
+
+    if len(ids) != len(seqs):
+        die("FASTA parse mismatch: ids!=")
+
+    # build symbol map, run Codon DP fallback for each sample
+    sym2mot = build_symbol_map(motifs)
+
+    # output file
+    out = open(out_path, "w")
+    out.write("#sample_id\tmotifs\n")
+
+    i = 0
+    total = len(ids)
+    while i < total:
+        sid = ids[i]
+        s = seqs[i]
+
+        # sanity: uppercase DNA only
+        ok = utils.is_valid_sequence(s.upper())
+        if not ok:
+            if verbose:
+                print("[WARN] non-DNA characters in sample " + sid + " (skipped)")
+            i += 1
+            continue
+
+        enc, dec_csv = decomposer.dp_decompose_greedy(s.upper(), sym2mot)
+        dec_list = utils.split_csv_row(dec_csv)
+
+        out.write(sid + "\t" + ",".join(dec_list) + "\n")
+
+        if verbose:
+            utils.print_progress_bar(i + 1, total, prefix="[DP]", suffix=sid, length=30)
+
+        i += 1
+
+    out.close()
+    if verbose:
+        print("[DONE] wrote " + out_path)
+
+
+if __name__ == "__main__":
+    main()

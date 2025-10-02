@@ -3,6 +3,18 @@ import os
 # Import the existing Python implementations first (fallbacks for everything)
 from utils import *  # relies on PYTHONPATH=.../week2/code
 
+def codon_call_args(cmd: str, *args):
+    """
+    Always defined so other modules can import it.
+    - If TRVIZ_IMPL=codon: forward to the worker bridge.
+    - Otherwise: return "" (callers in Python mode should not rely on it).
+    """
+    if os.getenv("TRVIZ_IMPL") == "codon":
+        # Lazy import to avoid import cycles when Python mode is used.
+        from ._codon_bridge import codon_call_args as _bridge_call
+        return _bridge_call(cmd, *args)
+    return ""
+
 # If TRVIZ_IMPL=codon, selectively override functions that you have ported.
 if os.getenv("TRVIZ_IMPL") == "codon":
     from ._codon_bridge import codon_call_args

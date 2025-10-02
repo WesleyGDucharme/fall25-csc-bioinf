@@ -1,4 +1,4 @@
-import sys
+import sys, os
 
 from .utils import (
   get_sample_and_sequence_from_fasta,
@@ -31,6 +31,7 @@ from .motif_aligner import (
 )
 
 from .decomposer import refine_pairs
+from .decomposer import dp_decompose_greedy
 
 # Protocol:
 # Client -> "CMD N" (one line), then N lines (each an arg)
@@ -193,7 +194,7 @@ def handle(cmd, args):
             println(ln)
         return
 
-    # ---- costs over motifs (no precomputed matrix; we recompute via motif sequences) ----
+    # ---- costs over motifs (no precomputed matrix; recompute done via motif sequences) ----
     if cmd == "utils.cost_pair":
         # args: allow_copy_change (0/1), then K "sym:motif", a separator "--", then 2 aligned strings
         if len(args) < 4:
@@ -413,6 +414,52 @@ def handle(cmd, args):
         while i < len(out_rows):
             println(out_rows[i]); i += 1
         return
+
+    # ----- decomposer.dp -----
+    # Input format:
+    #   args[0] = sequence (upper-case A/C/G/T recommended)
+    #   args[1] = comma-separated motifs (e.g., "ACT,TT,G")
+    # Output:
+    #   OK
+    #   2
+    #   ENC <encoded_symbols>
+    #   DEC <m1,m2,...>
+    if cmd == "decomposer.dp":
+        if len(args) < 2:
+            println("OK"); println("1"); println("NA"); return
+        seq = args[0]
+        mot_csv = args[1]
+        # parse motifs into a deterministic symbol map: a,b,c,...
+        #  mirror encoders INDEX_TO_CHR style with lowercase letters first
+        letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        # split CSV
+        motifs: List[str] = []
+        tok = ""
+        k = 0
+        while k < len(mot_csv):
+            ch = mot_csv[k]
+            if ch == ',':
+                motifs.append(tok); tok = ""
+            else:
+                tok = tok + ch
+            k += 1
+        motifs.append(tok)
+
+        sym2mot: Dict[str,str] = {}
+        idx = 0
+        m = 0
+        while m < len(motifs) and idx < len(letters):
+            sym = letters[idx:idx+1]
+            sym2mot[sym] = motifs[m]
+            idx += 1
+            m += 1
+
+        enc, dec = dp_decompose_greedy(seq, sym2mot)
+        println("OK"); println("2")
+        println("ENC\t" + enc)
+        println("DEC\t" + dec)
+        return
+
 
 def main():
     while True:

@@ -35,7 +35,9 @@ jobs:
 #          bash week1/evaluate.sh
       - name: Week 2
         working-directory: week2
+        shell: bash
         run: |
-          python -m pip install -U pip pytest
-          chmod +x evaluate.sh
-          ./evaluate.sh
+         # Python deps required by week2/code/utils.py at import time
+         python -m pip install -U pip pytest numpy biopython
+         chmod +x evaluate.sh
+         ./evaluate.sh

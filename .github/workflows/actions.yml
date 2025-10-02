@@ -27,12 +27,12 @@ jobs:
           echo "Found Python at: ${CODON_PYTHON}"
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-#      - name: Week 1
-#        env:
-#          CODON_PYTHON: ${{ env.CODON_PYTHON }}
-#        run: |
-#          chmod +x week1/evaluate.sh
-#          bash week1/evaluate.sh
+      - name: Week 1
+        env:
+          CODON_PYTHON: ${{ env.CODON_PYTHON }}
+        run: |
+          chmod +x week1/evaluate.sh
+          bash week1/evaluate.sh
       - name: Week 2
         working-directory: week2
         shell: bash

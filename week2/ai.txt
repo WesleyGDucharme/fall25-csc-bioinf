@@ -1,0 +1,26 @@
+LLM model used: ChatGPT 
+Version: GPT-5
+
+This ai.txt will be very similar to week 1's ai.txt as I used it in pretty much the same way.
+
+Prompts and Topics:
+Throughout my work on deliverable 2 I used ChatGPT to:
+- Explain what trviz does/how it works and get an early plan on how to go about porting the files (start with utils.py to codon, then motif_encoder, etc)
+
+- Debugging help.
+  * Ex: After every file had its initial ported version I would often get errors after running them on the tests and would use the LLM to help trace and solve errors faster if I was struggling to make a fix.
+
+- Getting guidance on making code Codon-compatible.
+  * Tried to deal with class conflicts but ended up getting the same functionality by making functions to do the same thing as those classes and instead avoided poritng whole classes. (This problem was mostly just encountered when I tried BioPython port first before swapping to doing Trviz)
+
+- Write automation scripts for testing and evaluation.
+  * Ex: Had it help me make the evaluate.sh file which ran the tests on both the codon and python versions and had it help me make small tests that targeted specifc files/function I ported to codon.
+
+- Helped with busy work.
+ * Documenttation and commented function labels were done by the LLM to help save time as I made this swap to porting Trviz very last minute. 
+
+Notes:
+- I edited and ran all code locally to verify correctness.
+- AI suggestions were adapted and integrated into my own implementation unless a version the ai suggested worked really well the first time.
+- Not all outputs from ChatGPT were used directly — in some cases I rolled back to earlier versions or of course ignored the answers and solution prototypes that I knew were wrong or would not work.
+

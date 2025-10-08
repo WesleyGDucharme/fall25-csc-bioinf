@@ -1,0 +1,205 @@
+# Minimal tree primitives for UPGMA/NJ tests
+
+class TreeError(Exception):
+    pass
+
+
+class TreeNode:
+    def __init__(self, children=None, distances=None, index=None):
+        # Public fields (tests access these)
+        self.children = []
+        self.parent = None
+        self.index = index            # leaf iff not None
+        self.distance = 0.0           # edge length to parent (root = 0)
+
+        if children is not None:
+            if index is not None:
+                raise TreeError("Leaf (index set) cannot have children")
+            if distances is None:
+                distances = [0.0] * len(children)
+            if len(distances) != len(children):
+                raise TreeError("distances length must match children length")
+            # attach children
+            for child, d in zip(children, distances):
+                if child.parent is not None:
+                    raise TreeError("Child already has a parent")
+                child.parent = self
+                # child's distance is distance to THIS node
+                child.distance = float(d)
+                self.children.append(child)
+
+    # ---- convenience helpers often used in tests ----
+    def get_indices(self):
+        """Return list of leaf indices under this node (DFS order)."""
+        out = []
+        self._collect_indices(self, out)
+        return out
+
+    def _collect_indices(self, node, out):
+        if node.index is not None and not node.children:
+            out.append(node.index)
+            return
+        for ch in node.children:
+            self._collect_indices(ch, out)
+
+    def get_leaf_count(self):
+        """Count leaves below this node."""
+        cnt = 0
+        stack = [self]
+        while stack:
+            n = stack.pop()
+            if n.index is not None and not n.children:
+                cnt += 1
+            else:
+                for c in n.children:
+                    stack.append(c)
+        return cnt
+
+    # ---- metrics on nodes ----
+    def distance_to(self, other):
+        """Metric distance along unique path to 'other'."""
+        # Build path map for self (node -> (edge_count, metric_sum))
+        amap_edges, amap_len = _path_to_root_maps(self)
+        # Walk other up until LCA
+        edges_b = 0
+        len_b = 0.0
+        cur = other
+        while cur is not None:
+            if cur in amap_edges:
+                # LCA found
+                ec = amap_edges[self] + edges_b - 2 * amap_edges[cur]
+                lc = amap_len[self] + len_b - 2.0 * amap_len[cur]
+                return lc
+            # step up
+            parent = cur.parent
+            if parent is None:
+                # reached root without meeting; trees differ?
+                break
+            edges_b += 1
+            len_b += cur.distance
+            cur = parent
+        raise TreeError("Nodes are not in the same tree")
+
+    def copy(self):
+        """Deep copy of this subtree (no shared objects)."""
+        if not self.children:
+            # leaf
+            dup = TreeNode(index=self.index)
+            dup.distance = self.distance
+            return dup
+        # internal
+        new_children = []
+        new_dists = []
+        for ch in self.children:
+            ch2 = ch.copy()
+            new_children.append(ch2)
+            new_dists.append(ch.distance)
+        dup = TreeNode(new_children, new_dists, index=None)
+        dup.distance = self.distance
+        return dup
+
+
+class Tree:
+    def __init__(self, root):
+        if root is None:
+            raise TreeError("Tree requires a root")
+        self.root = root
+        # Collect leaves and enforce index ordering invariant
+        self.leaves = _collect_leaves(root)
+        # Must have indices 0..n-1
+        idxs = [lf.index for lf in self.leaves]
+        if any(i is None for i in idxs):
+            raise TreeError("All leaves must have an index")
+        idxs_sorted = sorted(idxs)
+        for k, v in enumerate(idxs_sorted):
+            if k != v:
+                raise TreeError("Leaf indices must be contiguous 0..n-1")
+        # store leaves in index order
+        # (tests assume tree.leaves[i].index == i)
+        self.leaves.sort(key=lambda x: x.index)
+
+    def __len__(self):
+        return len(self.leaves)
+
+    def copy(self):
+        return Tree(self.root.copy())
+
+    def get_distance(self, i, j, topological=False):
+        """Distance between leaves i and j.
+        - metric (sum of edge lengths) if topological == False
+        - number of edges if topological == True
+        """
+        a = self.leaves[i]
+        b = self.leaves[j]
+
+        # Path maps for 'a'
+        a_edges, a_len = _path_to_root_maps(a)
+
+        # Walk up from 'b' to find LCA and accumulate b's stats
+        edges_b = 0
+        len_b = 0.0
+        cur = b
+        while cur is not None:
+            if cur in a_edges:
+                if topological:
+                    return a_edges[a] + edges_b - 2 * a_edges[cur]
+                else:
+                    return a_len[a] + len_b - 2.0 * a_len[cur]
+            parent = cur.parent
+            if parent is None:
+                break
+            edges_b += 1
+            len_b += cur.distance
+            cur = parent
+        raise TreeError("Leaves not in same tree")
+
+    def __eq__(self, other):
+        if not isinstance(other, Tree):
+            return False
+        return _canon(self.root) == _canon(other.root)
+
+
+# ---------- internal helpers ----------
+
+def _collect_leaves(root):
+    leaves = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.index is not None and not n.children:
+            leaves.append(n)
+        else:
+            for c in n.children:
+                stack.append(c)
+    return leaves
+
+
+def _path_to_root_maps(node):
+    """Return (edges_map, len_map) from node to root."""
+    edges_map = {}
+    len_map = {}
+    cur = node
+    edges = 0
+    length = 0.0
+    while cur is not None:
+        edges_map[cur] = edges
+        len_map[cur] = length
+        parent = cur.parent
+        if parent is None:
+            break
+        edges += 1
+        length += cur.distance
+        cur = parent
+    return edges_map, len_map
+
+
+def _canon(node):
+    """Order-insensitive canonical form including edge lengths."""
+    if node.index is not None and not node.children:
+        return ("L", node.index)
+    # internal node: multiset of (rounded_edge_len, child_key)
+    entries = []
+    for ch in node.children:
+        entries.append((round(ch.distance, 12), _canon(ch)))
+    entries.sort()
+    return ("I", tuple(entries))

@@ -1,0 +1,34 @@
+# Usage:
+#   codon run week3/test/run_codon_tests.codon
+#   codon run week3/test/run_codon_tests.codon --just-ms
+#
+# Env:
+#   PHYLO_IMPL=python (default)  -> uses Biotite via Python interop
+#   PHYLO_IMPL=codon             -> uses your Codon 'phylo' module
+
+import sys, time
+from test_phylo import run_all_tests  # imports the file above
+
+def main():
+    just_ms = False
+    for arg in sys.argv[1:]:
+        if arg == "--just-ms":
+            just_ms = True
+
+    t0 = time.perf_counter()
+    # Run all three tests (raises on failure)
+    _ = run_all_tests()
+    ms = int((time.perf_counter() - t0) * 1000.0)
+
+    if just_ms:
+        print(ms)
+    else:
+        # Only the Codon line here; your evaluate.sh can combine Python + Codon
+        print("Language    Runtime")
+        print("-------------------")
+        print(f"codon       {ms}ms")
+
+if __name__ == "__main__":
+    main()
+
+

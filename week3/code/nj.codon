@@ -1,0 +1,107 @@
+# Neighbor-Joining implementation that builds a Tree from an NxN distance matrix.
+
+from tree import Tree, TreeNode, TreeError
+
+def neighbor_joining(dist):
+    """
+    dist: list[list[int|float]] symmetric, zero diagonal
+    returns: Tree with leaves indexed 0..n-1
+    """
+    n = len(dist)
+    if n == 0:
+        raise TreeError("Empty distance matrix")
+    if any(len(row) != n for row in dist):
+        raise TreeError("Distance matrix must be square")
+
+    # Cluster IDs: integers. Map each id -> TreeNode for the current cluster.
+    nodes = {i: TreeNode(index=i) for i in range(n)}
+    active = [i for i in range(n)]
+
+    # Distance matrix keyed by cluster id (float values)
+    D = {i: {} for i in active}
+    for i in active:
+        for j in active:
+            if i == j:
+                D[i][j] = 0.0
+            else:
+                D[i][j] = float(dist[i][j])
+
+    next_id = n
+    eps = 1e-12
+
+    while len(active) > 2:
+        m = len(active)
+
+        # r[i] = sum_k D[i][k]
+        r = {i: sum(D[i][k] for k in active if k != i) for i in active}
+
+        # Find pair (i,j) minimizing Q = (m-2)*D[i][j] - r[i] - r[j]
+        best_pair = None
+        best_Q = None
+        for a_idx in range(len(active)):
+            i = active[a_idx]
+            for b_idx in range(a_idx + 1, len(active)):
+                j = active[b_idx]
+                Q = (m - 2) * D[i][j] - r[i] - r[j]
+                if best_Q is None or Q < best_Q:
+                    best_Q = Q
+                    best_pair = (i, j)
+        i, j = best_pair
+
+        # Limb lengths
+        delta = (r[i] - r[j]) / (m - 2)
+        Li = 0.5 * (D[i][j] + delta)
+        Lj = D[i][j] - Li
+        if Li < 0 and abs(Li) < eps:
+            Li = 0.0
+        if Lj < 0 and abs(Lj) < eps:
+            Lj = 0.0
+        if Li < -eps or Lj < -eps:
+            raise TreeError("Negative branch length encountered in NJ")
+
+        # New internal node u with children i and j
+        u = TreeNode([nodes[i], nodes[j]], [Li, Lj], index=None)
+        uid = next_id
+        next_id += 1
+        nodes[uid] = u
+
+        # Distances from u to all other clusters k
+        D[uid] = {}
+        for k in active:
+            if k == i or k == j:
+                continue
+            Duk = 0.5 * (D[i][k] + D[j][k] - D[i][j])
+            if Duk < 0 and abs(Duk) < eps:
+                Duk = 0.0
+            D[uid][k] = Duk
+
+        # Insert symmetric entries
+        for k in active:
+            if k == i or k == j:
+                continue
+            D[k][uid] = D[uid][k]
+
+        # Remove i and j from D
+        for k in list(D.keys()):
+            if k == i or k == j:
+                continue
+            if i in D[k]:
+                del D[k][i]
+            if j in D[k]:
+                del D[k][j]
+        if i in D:
+            del D[i]
+        if j in D:
+            del D[j]
+
+        # Update active set: drop i,j; add uid
+        active = [k for k in active if k != i and k != j]
+        active.append(uid)
+
+    # Final join of the last two clusters
+    a, b = active[0], active[1]
+    dab = D[a][b] if a in D and b in D[a] else D[b][a]
+    La = 0.5 * dab
+    Lb = 0.5 * dab
+    root = TreeNode([nodes[a], nodes[b]], [La, Lb], index=None)
+    return Tree(root)

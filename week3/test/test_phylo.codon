@@ -1,0 +1,130 @@
+#
+# By default this uses Biotite (Python interop) as the implementation.
+# When your Codon port is ready, set:  PHYLO_IMPL=codon
+# and ensure a Codon module named `phylo` is importable.
+
+from python import os, biotite   # Python interop
+# If you need timing here sometimes: from python import time
+
+# Implementation switch
+use_codon = (os.getenv("PHYLO_IMPL") == "codon")
+#if use_codon:
+#   import phylo  # your future Codon port must expose Tree, TreeNode, upgma, neighbor_joining, Tree.from_newick
+#else:
+phylo = biotite.sequence.phylo
+
+# --- helpers (pure Codon/Pythonic style) ---
+
+def approx_equal(a, b, eps=1e-3):
+    return abs(a - b) <= eps
+
+def read_text(path):
+    f = open(path, "r")
+    s = f.read()
+    f.close()
+    return s
+
+def read_distances_txt(path):
+    # distances.txt: space-separated ints
+    out = []
+    for line in open(path, "r"):
+        t = line.strip()
+        if t == "":
+            continue
+        row = [int(tok) for tok in t.split()]
+        out.append(row)
+    return out
+
+# Adjust if your data lives elsewhere
+DATA_DIR = "week3/data"
+DIST_PATH = DATA_DIR + "/distances.txt"
+NEWICK_UPGMA_PATH = DATA_DIR + "/newick_upgma.txt"
+
+# --- tests ---
+
+def test_upgma():
+    D = read_distances_txt(DIST_PATH)
+    tree = phylo.upgma(D)
+
+    ref_newick = read_text(NEWICK_UPGMA_PATH).strip()
+    ref_tree = phylo.Tree.from_newick(ref_newick)
+
+    for i in range(len(tree)):
+        for j in range(len(tree)):
+            d = tree.get_distance(i, j)
+            dr = ref_tree.get_distance(i, j)
+            if not approx_equal(d, dr, 1e-3):
+                raise Exception(f"UPGMA metric distance mismatch at ({i},{j}): {d} vs {dr}")
+            dt = tree.get_distance(i, j, topological=True)
+            dtr = ref_tree.get_distance(i, j, topological=True)
+            if dt != dtr:
+                raise Exception(f"UPGMA topological distance mismatch at ({i},{j}): {dt} vs {dtr}")
+
+def test_neighbor_joining():
+    dist = [
+        [0, 5, 4, 7, 6, 8],
+        [5, 0, 7, 10, 9, 11],
+        [4, 7, 0, 7, 6, 8],
+        [7, 10, 7, 0, 5, 9],
+        [6, 9, 6, 5, 0, 8],
+        [8, 11, 8, 9, 8, 0],
+    ]
+
+    ref_tree = phylo.Tree(
+        phylo.TreeNode(
+            [
+                phylo.TreeNode(
+                    [
+                        phylo.TreeNode(
+                            [
+                                phylo.TreeNode(index=0),
+                                phylo.TreeNode(index=1),
+                            ],
+                            [1, 4],
+                        ),
+                        phylo.TreeNode(index=2),
+                    ],
+                    [1, 2],
+                ),
+                phylo.TreeNode(
+                    [
+                        phylo.TreeNode(index=3),
+                        phylo.TreeNode(index=4),
+                    ],
+                    [3, 2],
+                ),
+                phylo.TreeNode(index=5),
+            ],
+            [1, 1, 5],
+        )
+    )
+
+    test_tree = phylo.neighbor_joining(dist)
+    if not (test_tree == ref_tree):
+        raise Exception("Neighbor-joining tree did not match expected topology")
+
+def test_distances():
+    D = read_distances_txt(DIST_PATH)
+    tree = phylo.upgma(D)
+
+    dist0 = tree.root.distance_to(tree.leaves[0])
+    for leaf in tree.leaves:
+        d = leaf.distance_to(tree.root)
+        if not approx_equal(d, dist0, 1e-9):
+            raise Exception("Leaf-to-root distances should be equal under UPGMA")
+
+    if tree.get_distance(0, 19, True) != 9:
+        raise Exception("Topological distance (0,19) expected 9")
+    if tree.get_distance(4, 2, True) != 10:
+        raise Exception("Topological distance (4,2) expected 10")
+
+# Public entry to run everything; returns True if all pass
+def run_all_tests():
+    #itest_upgma()
+    test_neighbor_joining()
+    #test_distances()
+    return True
+
+if __name__ == "__main__":
+    if run_all_tests():
+        print("All Codon tests passed.")

@@ -35,8 +35,8 @@ Codon test harness
 - Rewrote the three tests as code/test_phylo.codon, reusing the data files.  
 - Added code/run_codon_tests.codon to time all three tests and print either a table or just ms (--just-ms).  
 
-Gotchas  
--------  
+Design Choices (Often resulted in solutions to errors I was stuck on)
+---------------------------------------------------------------------
 
 - One return type per function. Ensured functions like get_distance() always return float; tests cast to int when comparing topological values.  
 - Dict keys for nodes. Codon requires both __hash__ and __eq__; used identity semantics (hash by id(self), equality by self is other) for path maps.  

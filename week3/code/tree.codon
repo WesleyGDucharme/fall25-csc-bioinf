@@ -1,12 +1,16 @@
 # Minimal tree primitives for UPGMA/NJ tests
 
-class TreeError(Exception):
-    pass
-
 
 class TreeNode:
-    def __init__(self, children=None, distances=None, index=None):
-        # Public fields (tests access these)
+    children: list[TreeNode]
+    parent: Optional[TreeNode]
+    index: Optional[int]
+    distance: float
+
+    def __init__(self, children = None,
+                 distances = None, 
+                 index: Optional[int] = None):
+        # Public fields
         self.children = []
         self.parent = None
         self.index = index            # leaf iff not None
@@ -14,15 +18,15 @@ class TreeNode:
 
         if children is not None:
             if index is not None:
-                raise TreeError("Leaf (index set) cannot have children")
+                raise Exception("Leaf (index set) cannot have children")
             if distances is None:
                 distances = [0.0] * len(children)
             if len(distances) != len(children):
-                raise TreeError("distances length must match children length")
+                raise Exception("distances length must match children length")
             # attach children
             for child, d in zip(children, distances):
                 if child.parent is not None:
-                    raise TreeError("Child already has a parent")
+                    raise Exception("Child already has a parent")
                 child.parent = self
                 # child's distance is distance to THIS node
                 child.distance = float(d)
@@ -55,6 +59,21 @@ class TreeNode:
                     stack.append(c)
         return cnt
 
+    def __hash__(self):
+    # identity-based hashing (like Python's default)
+        return id(self)
+
+    def __hash__(self):
+        # identity-based hashing (matches how we use nodes as keys)
+        return id(self)
+
+    def __eq__(self, other):
+        # compare by identity so two different nodes with same content aren't equal
+        return self is other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     # ---- metrics on nodes ----
     def distance_to(self, other):
         """Metric distance along unique path to 'other'."""
@@ -66,10 +85,7 @@ class TreeNode:
         cur = other
         while cur is not None:
             if cur in amap_edges:
-                # LCA found
-                ec = amap_edges[self] + edges_b - 2 * amap_edges[cur]
-                lc = amap_len[self] + len_b - 2.0 * amap_len[cur]
-                return lc
+                return float(float(amap_len[cur]) + len_b)
             # step up
             parent = cur.parent
             if parent is None:
@@ -78,7 +94,7 @@ class TreeNode:
             edges_b += 1
             len_b += cur.distance
             cur = parent
-        raise TreeError("Nodes are not in the same tree")
+        raise Exception("Nodes are not in the same tree")
 
     def copy(self):
         """Deep copy of this subtree (no shared objects)."""
@@ -98,24 +114,122 @@ class TreeNode:
         dup.distance = self.distance
         return dup
 
+def _nw_strip_ws(s):
+    # remove spaces/tabs/newlines for simpler parsing
+    out = []
+    for ch in s:
+        if ch not in [' ', '\t', '\n', '\r']:
+            out.append(ch)
+    return "".join(out)
+
+class _NWParser:
+    def __init__(self, s):
+        self.text = _nw_strip_ws(s)
+        self.pos = 0
+
+    def _peek(self):
+        if self.pos >= len(self.text):
+            return ''
+        return self.text[self.pos]
+
+    def _take(self):
+        ch = self._peek()
+        self.pos += 1
+        return ch
+
+    def _read_number(self):
+        start = self.pos
+        if self._peek() in ['+', '-']:
+            self._take()
+        has_digit = False
+        while self._peek().isdigit():
+            has_digit = True
+            self._take()
+        if self._peek() == '.':
+            self._take()
+            while self._peek().isdigit():
+                has_digit = True
+                self._take()
+        if self._peek() in ['e', 'E']:
+            self._take()
+            if self._peek() in ['+', '-']:
+                self._take()
+            while self._peek().isdigit():
+                has_digit = True
+                self._take()
+        if not has_digit:
+            raise Exception("Expected number in branch length")
+        return float(self.text[start:self.pos])
+
+    def _read_label(self):
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos] not in [',', ')', ':', ';']:
+            self.pos += 1
+        return self.text[start:self.pos].strip()
+
+    def _parse_subtree(self):
+        # returns (TreeNode, edge_len_to_parent)
+        if self._peek() == '(':
+            self._take()  # '('
+            children = []
+            dists = []
+
+            n, el = self._parse_subtree()
+            children.append(n); dists.append(el)
+            while self._peek() == ',':
+                self._take()
+                n, el = self._parse_subtree()
+                children.append(n); dists.append(el)
+
+            if self._peek() != ')':
+                raise Exception("Expected ')'")
+            self._take()  # ')'
+
+            # optional internal name: ignore any token until a delimiter
+            if self._peek() not in [':', ',', ')', ';', '']:
+                _ = self._read_label()
+
+            edge_len = 0.0
+            if self._peek() == ':':
+                self._take()
+                edge_len = self._read_number()
+
+            node = TreeNode(children, dists, index=None)
+            return node, edge_len
+        else:
+            lbl = self._read_label()
+            if lbl == "":
+                raise Exception("Empty leaf label")
+
+            # Require integer leaf labels (fits your test fixture)
+            try:
+                idx = int(lbl)
+            except:
+                raise Exception("Leaf label must be an integer")
+
+            edge_len = 0.0
+            if self._peek() == ':':
+                self._take()
+                edge_len = self._read_number()
+            node = TreeNode(index=idx)
+            return node, edge_len
+
 
 class Tree:
+    root: TreeNode
+    leaves: list[TreeNode]
     def __init__(self, root):
         if root is None:
-            raise TreeError("Tree requires a root")
+            raise Exception("Tree requires a root")
         self.root = root
-        # Collect leaves and enforce index ordering invariant
         self.leaves = _collect_leaves(root)
-        # Must have indices 0..n-1
         idxs = [lf.index for lf in self.leaves]
         if any(i is None for i in idxs):
-            raise TreeError("All leaves must have an index")
+            raise Exception("All leaves must have an index")
         idxs_sorted = sorted(idxs)
         for k, v in enumerate(idxs_sorted):
             if k != v:
-                raise TreeError("Leaf indices must be contiguous 0..n-1")
-        # store leaves in index order
-        # (tests assume tree.leaves[i].index == i)
+                raise Exception("Leaf indices must be contiguous 0..n-1")
         self.leaves.sort(key=lambda x: x.index)
 
     def __len__(self):
@@ -132,32 +246,36 @@ class Tree:
         a = self.leaves[i]
         b = self.leaves[j]
 
-        # Path maps for 'a'
-        a_edges, a_len = _path_to_root_maps(a)
+        if topological:
+            return _topo_distance(a, b)
 
-        # Walk up from 'b' to find LCA and accumulate b's stats
-        edges_b = 0
+        # metric branch (unchanged; sum to LCA)
+        a_edges, a_len = _path_to_root_maps(a)
         len_b = 0.0
         cur = b
         while cur is not None:
             if cur in a_edges:
-                if topological:
-                    return a_edges[a] + edges_b - 2 * a_edges[cur]
-                else:
-                    return a_len[a] + len_b - 2.0 * a_len[cur]
+                return float(float(a_len[cur]) + len_b)
             parent = cur.parent
             if parent is None:
                 break
-            edges_b += 1
             len_b += cur.distance
             cur = parent
-        raise TreeError("Leaves not in same tree")
+        raise Exception("Leaves not in same tree")
+
 
     def __eq__(self, other):
         if not isinstance(other, Tree):
             return False
         return _canon(self.root) == _canon(other.root)
 
+    @staticmethod
+    def from_newick(s, labels=None):
+        p = _NWParser(s)
+        node, _ = p._parse_subtree()
+        if p._peek() == ';':
+            p._take()
+        return Tree(node)
 
 # ---------- internal helpers ----------
 
@@ -183,12 +301,12 @@ def _path_to_root_maps(node):
     length = 0.0
     while cur is not None:
         edges_map[cur] = edges
-        len_map[cur] = length
+        len_map[cur] = float(length)
         parent = cur.parent
         if parent is None:
             break
         edges += 1
-        length += cur.distance
+        length += float(cur.distance)
         cur = parent
     return edges_map, len_map
 
@@ -196,10 +314,39 @@ def _path_to_root_maps(node):
 def _canon(node):
     """Order-insensitive canonical form including edge lengths."""
     if node.index is not None and not node.children:
-        return ("L", node.index)
-    # internal node: multiset of (rounded_edge_len, child_key)
-    entries = []
+        return f"L{node.index}"
+    parts = []
     for ch in node.children:
-        entries.append((round(ch.distance, 12), _canon(ch)))
-    entries.sort()
-    return ("I", tuple(entries))
+        # include edge length with consistent rounding/format
+        parts.append(f"{round(ch.distance, 12):.12f}:{_canon(ch)}")
+    parts.sort()
+    return "I[" + ",".join(parts) + "]"
+
+# helper: count edges between two leaves
+def _topo_distance(a, b):
+    # steps from a to each ancestor
+    seen = {}
+    steps = 0
+    x = a
+    while x is not None:
+        seen[x] = steps
+        parent = x.parent
+        if parent is None:
+            break
+        steps += 1
+        x = parent
+
+    # walk from b upward until we hit an ancestor of a
+    steps_b = 0
+    y = b
+    while y is not None:
+        if y in seen:
+            # exact integer edge count
+            return float(seen[y] + steps_b)  # keep get_distance return type == float
+        parent = y.parent
+        if parent is None:
+            break
+        steps_b += 1
+        y = parent
+
+    raise Exception("Leaves not in same tree")

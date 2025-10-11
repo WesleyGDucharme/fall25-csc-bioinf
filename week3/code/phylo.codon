@@ -1,6 +1,6 @@
-# Aggregates the files so tests can `import phylo` and call all the needed functions.
+# Aggregates the files so tests can `import phylo` and call all the needed functions
 
-from tree import Tree, TreeNode, TreeError
+from tree import Tree, TreeNode
 from nj import neighbor_joining
 from upgma import upgma
 

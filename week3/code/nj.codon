@@ -1,6 +1,6 @@
 # Neighbor-Joining implementation that builds a Tree from an NxN distance matrix.
 
-from tree import Tree, TreeNode, TreeError
+from tree import Tree, TreeNode
 
 def neighbor_joining(dist):
     """
@@ -9,9 +9,9 @@ def neighbor_joining(dist):
     """
     n = len(dist)
     if n == 0:
-        raise TreeError("Empty distance matrix")
+        raise Exception("Empty distance matrix")
     if any(len(row) != n for row in dist):
-        raise TreeError("Distance matrix must be square")
+        raise Exception("Distance matrix must be square")
 
     # Cluster IDs: integers. Map each id -> TreeNode for the current cluster.
     nodes = {i: TreeNode(index=i) for i in range(n)}
@@ -29,24 +29,28 @@ def neighbor_joining(dist):
     next_id = n
     eps = 1e-12
 
-    while len(active) > 2:
+    while len(active) > 3:
         m = len(active)
 
         # r[i] = sum_k D[i][k]
         r = {i: sum(D[i][k] for k in active if k != i) for i in active}
 
         # Find pair (i,j) minimizing Q = (m-2)*D[i][j] - r[i] - r[j]
-        best_pair = None
-        best_Q = None
+        best_i = active[0]
+        best_j = active[1]
+        best_Q = (m - 2) * D[best_i][best_j] - r[best_i] - r[best_j]
+
         for a_idx in range(len(active)):
             i = active[a_idx]
             for b_idx in range(a_idx + 1, len(active)):
                 j = active[b_idx]
                 Q = (m - 2) * D[i][j] - r[i] - r[j]
-                if best_Q is None or Q < best_Q:
+                if Q < best_Q:
                     best_Q = Q
-                    best_pair = (i, j)
-        i, j = best_pair
+                    best_i = i
+                    best_j = j
+
+        i, j = best_i, best_j
 
         # Limb lengths
         delta = (r[i] - r[j]) / (m - 2)
@@ -57,7 +61,7 @@ def neighbor_joining(dist):
         if Lj < 0 and abs(Lj) < eps:
             Lj = 0.0
         if Li < -eps or Lj < -eps:
-            raise TreeError("Negative branch length encountered in NJ")
+            raise Exception("Negative branch length encountered in NJ")
 
         # New internal node u with children i and j
         u = TreeNode([nodes[i], nodes[j]], [Li, Lj], index=None)
@@ -98,10 +102,27 @@ def neighbor_joining(dist):
         active = [k for k in active if k != i and k != j]
         active.append(uid)
 
-    # Final join of the last two clusters
-    a, b = active[0], active[1]
-    dab = D[a][b] if a in D and b in D[a] else D[b][a]
-    La = 0.5 * dab
-    Lb = 0.5 * dab
-    root = TreeNode([nodes[a], nodes[b]], [La, Lb], index=None)
+    # Final join of the last three clusters
+    i, j, k = active[0], active[1], active[2]
+
+    def Dget(a, b):
+        if a in D and b in D[a]:
+            return D[a][b]
+        return D[b][a]
+
+    Dij = Dget(i, j)
+    Dik = Dget(i, k)
+    Djk = Dget(j, k)
+
+    # Pendant lengths for a 3-way root
+    Li = 0.5 * (Dij + Dik - Djk)
+    Lj = 0.5 * (Dij + Djk - Dik)
+    Lk = 0.5 * (Dik + Djk - Dij)
+
+    # Clamp tiny negative noise
+    if abs(Li) < eps: Li = 0.0
+    if abs(Lj) < eps: Lj = 0.0
+    if abs(Lk) < eps: Lk = 0.0
+
+    root = TreeNode([nodes[i], nodes[j], nodes[k]], [Li, Lj, Lk], index=None)
     return Tree(root)

@@ -1,1 +1,101 @@
-# Placeholder for upgma
+# UPGMA: average-linkage clustering that returns a Tree.
+# Assumptions: symmetric NxN matrix, zeros on diagonal.
+
+from tree import Tree, TreeNode
+
+def upgma(dist):
+    n = len(dist)
+    if n == 0:
+        raise Exception("Empty distance matrix")
+    for row in dist:
+        if len(row) != n:
+            raise Exception("Distance matrix must be square")
+
+    # Initial clusters: one per leaf
+    nodes = {i: TreeNode(index=i) for i in range(n)}  # id -> TreeNode
+    size  = {i: 1 for i in range(n)}                  # id -> cluster size
+    height = {i: 0.0 for i in range(n)}               # id -> cluster height (ultrametric)
+    active = [i for i in range(n)]                    # list of active cluster ids
+
+    # Float distance matrix D keyed by cluster id
+    D = {i: {} for i in active}
+    for i in active:
+        for j in active:
+            if i == j:
+                D[i][j] = 0.0
+            else:
+                D[i][j] = float(dist[i][j])
+
+    next_id = n
+    eps = 1e-12
+
+    while len(active) > 1:
+        # --- find closest pair (i, j) ---
+        best_i = active[0]
+        best_j = active[1]
+        best_d = D[best_i][best_j] if best_j in D[best_i] else D[best_j][best_i]
+        for a_idx in range(len(active)):
+            i = active[a_idx]
+            for b_idx in range(a_idx + 1, len(active)):
+                j = active[b_idx]
+                dij = D[i][j] if j in D[i] else D[j][i]
+                if dij < best_d:
+                    best_d = dij
+                    best_i = i
+                    best_j = j
+        i, j = best_i, best_j
+
+        # --- compute new cluster height & child edge lengths ---
+        h_parent = 0.5 * (D[i][j] if j in D[i] else D[j][i])
+        Li = h_parent - height[i]
+        Lj = h_parent - height[j]
+        # clamp tiny negative noise
+        if abs(Li) < eps: Li = 0.0
+        if abs(Lj) < eps: Lj = 0.0
+        if Li < -eps or Lj < -eps:
+            raise Exception("UPGMA produced negative branch length")
+
+        # --- create new internal node u = (i,j) ---
+        u = TreeNode([nodes[i], nodes[j]], [Li, Lj], index=None)
+        uid = next_id
+        next_id += 1
+        nodes[uid] = u
+        height[uid] = h_parent
+        size[uid] = size[i] + size[j]
+
+        # --- distances from u to all other clusters k (weighted average) ---
+        D[uid] = {}
+        for k in active:
+            if k == i or k == j:
+                continue
+            dik = D[i][k] if k in D[i] else D[k][i]
+            djk = D[j][k] if k in D[j] else D[k][j]
+            Duk = (size[i] * dik + size[j] * djk) / (size[i] + size[j])
+            if abs(Duk) < eps:  # just in case
+                Duk = 0.0
+            D[uid][k] = Duk
+
+        # symmetric entries
+        for k in active:
+            if k == i or k == j:
+                continue
+            D[k][uid] = D[uid][k]
+
+        # --- remove i, j from the matrix ---
+        for k in list(D.keys()):
+            if k == i or k == j:
+                continue
+            if i in D[k]:
+                del D[k][i]
+            if j in D[k]:
+                del D[k][j]
+        if i in D: del D[i]
+        if j in D: del D[j]
+
+        # --- update active set ---
+        active = [k for k in active if k != i and k != j]
+        active.append(uid)
+
+    # Single remaining cluster is the root
+    root_id = active[0]
+    return Tree(nodes[root_id])

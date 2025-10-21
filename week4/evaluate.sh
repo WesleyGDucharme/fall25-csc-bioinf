@@ -30,11 +30,24 @@ label_of() {
   esac
 }
 
-# time helper -> integer ms
+# time a command, return milliseconds as integer (robust for CI)
 run_ms() {
   local cmd="$*"
-  local sec
-  { TIMEFORMAT=%R; sec=$( { time bash -c "$cmd" >/dev/null; } 2>&1 ); } 2>/dev/null
+  local sec=""
+  # /usr/bin/time writes to stderr; capture it. Keep going even if command exits nonzero.
+  sec=$(/usr/bin/time -f '%e' bash -c "$cmd" >/dev/null 2>&1 || true)
+
+  # Fallback if %e didn't come through (rare CI quirk)
+  if [[ -z "$sec" ]]; then
+    local start end
+    start=$(date +%s%3N)
+    bash -c "$cmd" >/dev/null 2>&1 || true
+    end=$(date +%s%3N)
+    echo $(( end - start ))
+    return
+  fi
+
+  # Convert seconds (float) -> ms (int)
   awk -v s="$sec" 'BEGIN{printf("%.0f", s*1000)}'
 }
 

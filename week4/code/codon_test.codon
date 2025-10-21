@@ -1,0 +1,171 @@
+# Codon version tests
+
+# Codon alignment test harness.
+#
+# Examples:
+#   # q1 vs t1 (first sequences)
+#   codon run test/codon_test.codon --method global-linear --query data/q1.fa --target data/t1.fa --fasta
+#
+#   # q3 vs t3 by index
+#   codon run test/codon_test.codon --method local-linear --query data/q1.fa --target data/t1.fa --fasta --index 3
+#
+#   # q5 vs t5 by header tokens
+#   codon run test/codon_test.codon --method global-affine --query data/q1.fa --target data/t1.fa --fasta --qid q5 --tid t5
+
+import sys
+import codon_align  # since we're in the same folder
+
+# ---------- FASTA utilities ----------
+def read_all_fasta(path: str):
+    recs = []          # list of (header, seq_upper)
+    header = ""
+    seq = ""
+    with open(path, "r") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            if not line:
+                continue
+            if len(line) > 0 and line[0] == '>':
+                if header != "":
+                    recs.append((header, seq.upper()))
+                header = line[1:].strip()
+                seq = ""
+            else:
+                s = line.strip()
+                if s:
+                    seq += s
+    if header != "":
+        recs.append((header, seq.upper()))
+    return recs
+
+def read_raw(path: str) -> str:
+    with open(path, "r") as f:
+        s = f.read()
+    return s.strip().upper()
+
+def select_seq(recs, index: int, wanted_id: str, label: str) -> str:
+    # wanted_id > index > first
+    if wanted_id != "":
+        for (h, s) in recs:
+            tok = h.split()[0]
+            if tok == wanted_id:
+                return s
+        sys.stderr.write(f"ARG_ERROR\t{label} id '{wanted_id}' not found\n")
+        sys.exit(2)
+    if index > 0:
+        i = index - 1
+        if i < 0 or i >= len(recs):
+            sys.stderr.write(f"ARG_ERROR\t{label} index {index} out of range (n={len(recs)})\n")
+            sys.exit(2)
+        return recs[i][1]
+    if len(recs) == 0:
+        sys.stderr.write(f"ARG_ERROR\t{label} FASTA is empty\n")
+        sys.exit(2)
+    return recs[0][1]
+
+def slice_1based(seq: str, spec: str):
+    if spec == "":
+        return seq
+    parts = spec.split(":")
+    if len(parts) != 2:
+        sys.stderr.write(f"ARG_ERROR\tbad slice '{spec}'\n"); sys.exit(2)
+    a = parts[0]; b = parts[1]
+    i = int(a) if a != "" else 1
+    j = int(b) if b != "" else len(seq)
+    if i < 1: i = 1
+    if j > len(seq): j = len(seq)
+    if j < i: return ""
+    # Python-style slice uses 0-based, end-exclusive
+    return seq[i-1:j]
+
+# ---------- CLI parsing ----------
+def parse_args(argv):
+    args = {}
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--method" and i + 1 < len(argv):
+            args["method"] = argv[i + 1]; i += 2; continue
+        if a == "--query" and i + 1 < len(argv):
+            args["query"] = argv[i + 1]; i += 2; continue
+        if a == "--target" and i + 1 < len(argv):
+            args["target"] = argv[i + 1]; i += 2; continue
+        if a == "--fasta":
+            args["fasta"] = "1"; i += 1; continue
+        if a == "--index" and i + 1 < len(argv):
+            args["index"] = argv[i + 1]; i += 2; continue
+        if a == "--qid" and i + 1 < len(argv):
+            args["qid"] = argv[i + 1]; i += 2; continue
+        if a == "--tid" and i + 1 < len(argv):
+            args["tid"] = argv[i + 1]; i += 2; continue
+        if a == "--limit" and i + 1 < len(argv):
+            args["limit"] = argv[i + 1]; i += 2; continue
+        if a == "--slice-q" and i + 1 < len(argv):
+            args["slice_q"] = argv[i + 1]; i += 2; continue
+        if a == "--slice-t" and i + 1 < len(argv):
+            args["slice_t"] = argv[i + 1]; i += 2; continue
+        i += 1
+    return args
+
+# ---------- Main ----------
+def main() -> int:
+    args = parse_args(sys.argv)
+    if "method" not in args or "query" not in args or "target" not in args:
+        sys.stderr.write("USAGE\t--method {global-linear|local-linear|fitting-affine|global-affine} "
+                         "--query <path> --target <path> [--fasta] [--index N|--qid ID --tid ID]\n")
+        return 2
+
+    is_fasta = "fasta" in args
+    if is_fasta:
+        qrecs = read_all_fasta(args["query"])
+        trecs = read_all_fasta(args["target"])
+        idx = int(args["index"]) if "index" in args else 0
+        qid = args["qid"] if "qid" in args else ""
+        tid = args["tid"] if "tid" in args else ""
+        q = select_seq(qrecs, idx, qid, "query")
+        t = select_seq(trecs, idx, tid, "target")
+    else:
+        q = read_raw(args["query"])
+        t = read_raw(args["target"])
+
+    sq = args["slice_q"] if "slice_q" in args else ""
+    st = args["slice_t"] if "slice_t" in args else ""
+    q = slice_1based(q, sq)
+    t = slice_1based(t, st)
+    if "limit" in args:
+        L = int(args["limit"])
+        if L > 0:
+            if len(q) > L: q = q[:L]
+            if len(t) > L: t = t[:L]
+
+    m = args["method"]
+    try:
+        if m == "global-linear":
+            score, aq, at = codon_align.global_align_linear(q, t)
+        elif m == "local-linear":
+            score, aq, at = codon_align.local_align_linear(q, t)
+        elif m == "fitting-affine":
+            score, aq, at = codon_align.fitting_align_affine(q, t)
+        elif m == "global-affine":
+            score, aq, at = codon_align.global_align_affine(q, t)
+        else:
+            sys.stderr.write(f"BAD_METHOD\t{m}\n")
+            return 2
+    except AttributeError as _e:
+        # Method not present in codon_align yet
+        missing = {
+            "global-linear": "global_align_linear",
+            "local-linear": "local_align_linear",
+            "fitting-affine": "fitting_align_affine",
+            "global-affine": "global_align_affine",
+        }.get(m, m)
+        sys.stderr.write(f"NOT_IMPLEMENTED\t{missing}\n")
+        return 2
+
+    print(f"SCORE\t{score}")
+    print(f"ALNQ\t{aq}")
+    print(f"ALNT\t{at}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

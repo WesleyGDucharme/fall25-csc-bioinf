@@ -27,34 +27,34 @@ jobs:
           echo "Found Python at: ${CODON_PYTHON}"
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-      # - name: Week 1
-      #   env:
-      #     CODON_PYTHON: ${{ env.CODON_PYTHON }}
-      #   run: |
-      #     chmod +x week1/evaluate.sh
-      #     bash week1/evaluate.sh
-      # - name: Week 2
-      #   working-directory: week2
-      #   shell: bash
-      #   run: |
-      #    # Python deps required by week2/code/utils.py at import time
-      #    python -m pip install -U pip pytest numpy biopython
-      #    chmod +x evaluate.sh
-      #    ./evaluate.sh
-      # - name: Week 3
-      #   working-directory: week3
-      #   shell: bash
-      #   env:
-      #     CODON_PYTHON: ${{ env.CODON_PYTHON }}
-      #   run: |
-      #     # Python deps for the baseline + test harness
-      #     python -m pip install -U pip setuptools wheel
-      #     python -m pip install numpy pytest cython
-      #     # Try PyPI first; if biotite wheel isn't available for this Python, fall back to GitHub
-      #     python -m pip install biotite || python -m pip install 'git+https://github.com/biotite-dev/biotite@master'
-      #     # Run the combined timing script
-      #     chmod +x evaluate.sh
-      #     ./evaluate.sh
+      - name: Week 1
+        env:
+          CODON_PYTHON: ${{ env.CODON_PYTHON }}
+        run: |
+          chmod +x week1/evaluate.sh
+          bash week1/evaluate.sh
+      - name: Week 2
+        working-directory: week2
+        shell: bash
+        run: |
+         # Python deps required by week2/code/utils.py at import time
+         python -m pip install -U pip pytest numpy biopython
+         chmod +x evaluate.sh
+         ./evaluate.sh
+      - name: Week 3
+        working-directory: week3
+        shell: bash
+        env:
+          CODON_PYTHON: ${{ env.CODON_PYTHON }}
+        run: |
+          # Python deps for the baseline + test harness
+          python -m pip install -U pip setuptools wheel
+          python -m pip install numpy pytest cython
+          # Try PyPI first; if biotite wheel isn't available for this Python, fall back to GitHub
+          python -m pip install biotite || python -m pip install 'git+https://github.com/biotite-dev/biotite@master'
+          # Run the combined timing script
+          chmod +x evaluate.sh
+          ./evaluate.sh
       - name: Week 4
         working-directory: week4
         shell: bash

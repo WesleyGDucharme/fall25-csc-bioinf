@@ -32,7 +32,6 @@ Verified with diff -u on all q/t pairs and on multiple MT windows/slices.
 Input modes: raw strings or FASTA (--fasta).  
 Multi-FASTA selection: --index N (1-based qN/tN), or --qid qK + --tid tK.  
 MT windows / memory control: --limit N, --slice-q a:b, --slice-t a:b (1-based inclusive).  
-
 Output (3 lines):  
 SCORE  <int>  
 ALNQ   <aligned_query>  

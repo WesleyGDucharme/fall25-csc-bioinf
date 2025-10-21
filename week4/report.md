@@ -43,7 +43,9 @@ Robust timing in CI: /usr/bin/time -f %e → ms; fallback to date if needed.
 Clear labels: globalL, local, fittingA, globalA.  
 Includes asymmetric fittingA-mt_orang (orang→human) since fitting is directional.  
 
-5) Layout & data  
+Repo and File Layout  
+--------------------
+
 week4/  
 ├─ code/  
 │  ├─ codon_align.codon      # 4 Codon algorithms  

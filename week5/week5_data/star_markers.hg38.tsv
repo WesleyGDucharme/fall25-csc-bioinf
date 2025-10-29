@@ -1,0 +1,13 @@
+gene	star	rsid	chr	pos	ref	alt	notes
+CYP2C19	*2	rs4244285	chr10	94781859	G	A	LOF splice; defines *2
+CYP2C19	*3	rs4986893	chr10	94780653	G	A	LOF stop; defines *3
+CYP2C19	*17	rs12248560	chr10	94761900	C	T	Promoter; increased function *17
+
+CYP2C9	*2	rs1799853	chr10	94942290	C	T	R144C; defines *2
+CYP2C9	*3	rs1057910	chr10	94942215	A	C	I359L; defines *3
+
+# CYP2C8: *3 is a 2-marker haplotype; both must be on the SAME haplotype
+CYP2C8	*2	rs11572103	chr10	95058349	T	A	I269F; defines *2
+CYP2C8	*3a	rs11572080	chr10	95067273	G	A	R139K; with rs10509681
+CYP2C8	*3b	rs10509681	chr10	95038992	A	G	K399R; with rs11572080
+CYP2C8	*4	rs1058930	chr10	95058362	G	C	I264M; defines *4

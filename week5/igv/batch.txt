@@ -1,0 +1,7 @@
+new
+genome refs/chr10.fa
+load align/illumina.chr10.bam
+load align/pacbio.chr10.bam
+snapshotDirectory igv/snaps
+maxPanelHeight 800
+squish

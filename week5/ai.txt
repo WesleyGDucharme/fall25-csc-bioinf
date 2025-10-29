@@ -1,0 +1,15 @@
+LLM model used: ChatGPT 
+Version: GPT-5
+
+This ai.txt will be very similar to prior descriptions, as I used it in pretty much the same way.
+
+Prompts and Topics:
+Throughout my work on deliverable 3 I used ChatGPT to:
+- Used it to genate bash script cell recommnedations for the notebook file for each section.
+- Used it help debug and plan how to run each script for each step.
+- got its help when setting up IGV and working with the screenshots.
+
+Notes:
+- I edited and ran all code locally to verify correctness.
+- AI suggestions were adapted and integrated into my own implementation unless a version the ai suggested worked really well the first time.
+- Not all outputs from ChatGPT were used directly — in some cases I rolled back to earlier versions or of course ignored the answers and solution prototypes that I knew were wrong or would not work.

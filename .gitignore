@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.ipynb_checkpoints/
+
+# Week5 generated artifacts (DO NOT TRACK)
+week5/align/
+week5/isec/
+week5/phase/
+week5/tmp/
+week5/igv/snaps/
+week5/vcf/*.vcf.gz
+week5/vcf/*.tbi
+week5/refs/*.mmi
+week5/refs/chr10.fa*

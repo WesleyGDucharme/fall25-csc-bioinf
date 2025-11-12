@@ -132,4 +132,4 @@ jobs:
             --execute \
             --inplace \
             --ExecutePreprocessor.timeout=5400 \
-            week6.ipynb
+            week6/week6.ipynb

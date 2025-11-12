@@ -93,35 +93,41 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Micromamba gives us a clean env with Python 3.11
+          # Micromamba needs a root prefix
+          export MAMBA_ROOT_PREFIX="$HOME/micromamba"
+          mkdir -p "$MAMBA_ROOT_PREFIX"
+
+          # Install micromamba and enable it
           curl -L https://micro.mamba.pm/api/micromamba/linux-64/latest \
             | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
           eval "$(/usr/local/bin/micromamba shell hook -s bash)"
 
-          # Create env and install exact deps Scanpy/CellTypist need
+          # Create env and install deps (note: ipykernel added)
           micromamba create -y -n scweek6 -c conda-forge -c bioconda python=3.11 pip
           micromamba install -y -n scweek6 -c conda-forge -c bioconda \
             scanpy anndata matplotlib pandas numpy h5py umap-learn \
-            python-igraph leidenalg jupyter nbconvert celltypist \
-            ipywidgets \
-            simpleaf alevin-fry salmon || true  # safe if unused
+            python-igraph leidenalg jupyter nbconvert ipykernel celltypist \
+            ipywidgets simpleaf alevin-fry salmon || true
 
-          # Make sure pip is fresh (some wheels come from pip)
           micromamba run -n scweek6 python -m pip install --upgrade pip
 
-          # Pre-fetch the small CellTypist model so the run is deterministic
-          micromamba run -n scweek6 python - <<'PY'
+          # Prefetch a small CellTypist model (non-fatal)
+          micromamba run -n scweek6 python - <<'PY' || true
           from celltypist import models
-          try:
-              models.download_models(model='Immune_All_Low')
-          except TypeError:
-              models.download_models()
+          for name in ("Immune_All_Low","Immune_All_High","Healthy_COVID19_PBMC","COVID19_Immune_Landscape"):
+              try:
+                  models.download_models(model=name)
+                  break
+              except Exception:
+                  pass
           PY
 
-          # Execute the notebook IN PLACE so outputs are embedded in it
+          # Execute notebook in-place; force python3 kernel
           micromamba run -n scweek6 jupyter nbconvert \
             --to notebook \
             --execute \
             --inplace \
+            --ExecutePreprocessor.kernel_name=python3 \
             --ExecutePreprocessor.timeout=5400 \
-            week6.ipynb
+            week6/week6.ipynb
+

@@ -93,23 +93,23 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # Micromamba gives us a clean env with Python 3.11
+          export MAMBA_ROOT_PREFIX="$HOME/micromamba"
+          mkdir -p "$MAMBA_ROOT_PREFIX"
+
           curl -L https://micro.mamba.pm/api/micromamba/linux-64/latest \
             | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba
+
           eval "$(/usr/local/bin/micromamba shell hook -s bash)"
 
-          # Create env and install exact deps Scanpy/CellTypist need
           micromamba create -y -n scweek6 -c conda-forge -c bioconda python=3.11 pip
           micromamba install -y -n scweek6 -c conda-forge -c bioconda \
             scanpy anndata matplotlib pandas numpy h5py umap-learn \
             python-igraph leidenalg jupyter nbconvert celltypist \
             ipywidgets \
-            simpleaf alevin-fry salmon || true  # safe if unused
+            simpleaf alevin-fry salmon || true
 
-          # Make sure pip is fresh (some wheels come from pip)
           micromamba run -n scweek6 python -m pip install --upgrade pip
 
-          # Pre-fetch the small CellTypist model so the run is deterministic
           micromamba run -n scweek6 python - <<'PY'
           from celltypist import models
           try:
@@ -118,7 +118,6 @@ jobs:
               models.download_models()
           PY
 
-          # Execute the notebook IN PLACE so outputs are embedded in it
           micromamba run -n scweek6 jupyter nbconvert \
             --to notebook \
             --execute \

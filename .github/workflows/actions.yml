@@ -110,14 +110,23 @@ jobs:
 
           micromamba run -n scweek6 python -m pip install --upgrade pip
 
-          micromamba run -n scweek6 python - <<'PY'
+          # Pre-fetch a model if possible
+          micromamba run -n scweek6 python - <<'PY' || true
           from celltypist import models
+          # Try a few common names; if none match, just fetch the catalog and let the notebook lazy-download
+          for name in ("Immune_All_Low", "Immune_All_High", "Healthy_COVID19_PBMC", "COVID19_Immune_Landscape"):
           try:
-              models.download_models(model='Immune_All_Low')
-          except TypeError:
+              models.download_models(model=name)
+              break
+          except Exception:
+              continue
+          # Final fallback: just pull the catalog (no specific model). The notebook will download on demand.
+          try:
               models.download_models()
+          except Exception:
+              pass
           PY
-
+          
           micromamba run -n scweek6 jupyter nbconvert \
             --to notebook \
             --execute \
